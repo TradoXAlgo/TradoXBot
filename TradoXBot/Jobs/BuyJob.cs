@@ -41,7 +41,8 @@ public class BuyJob : IJob
                 _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Skipped due to month-end restriction.");
                 return;
             }
-            var now = DateTime.Now;
+            var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
             var marketClose = new TimeSpan(15, 30, 0);
             // if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
@@ -49,6 +50,7 @@ public class BuyJob : IJob
             //     _logger.LogInformation("Buy Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
             //     return;
             // }
+
 
             _logger.LogInformation("Executing Buy Job at {Time}", now);
             // Authenticate and check portfolio/funds
@@ -62,15 +64,23 @@ public class BuyJob : IJob
             }
 
             var availableFunds = 100000;//await _stoxKartClient.GetFundsAsync();
-            var openCount = await _mongoDbService.GetOpenPositionCountAsync();
-            if (openCount >= 5)
+            // var openCount = await _mongoDbService.GetOpenPositionCountAsync();
+            // if (openCount >= 5)
+            // {
+            //     _logger.LogWarning("Portfolio limit reached (5 positions).");
+            //     _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Portfolio limit reached (5 positions).");
+            //     return;
+            // }
+
+            var dailyStockCount = await _mongoDbService.GetDailyUniqueStocksBoughtAsync();
+            if (dailyStockCount >= 5)
             {
-                _logger.LogWarning("Portfolio limit reached (5 positions).");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Portfolio limit reached (5 positions).");
+                _logger.LogWarning("Daily buy limit reached (5 unique stocks). Skipping buy.");
+                await _telegramBot.SendMessage(_chatId, "Buy Job: Daily buy limit reached (5 unique stocks).");
                 return;
             }
 
-            var maxOrders = Math.Min((int)(availableFunds / 20000), 5 - openCount);
+            var maxOrders = Math.Min((int)(availableFunds / 20000), 5 - dailyStockCount);
             if (maxOrders <= 0)
             {
                 _logger.LogWarning("Insufficient funds for swing buy.");

@@ -117,10 +117,39 @@ namespace TradoXBot.Services
             await collection.UpdateOneAsync(filter, update);
         }
 
+        public async Task<int> GetDailyUniqueStocksBoughtAsync()
+        {
+            try
+            {
+                // Use IST for date comparison
+                var now = DateTime.UtcNow.AddHours(5.5); // Convert to IST
+                var today = now.Date;
+                var tomorrow = today.AddDays(1);
+
+                var swingFilter = Builders<Transaction>.Filter.Gte(t => t.BuyDate, today) &
+                                 Builders<Transaction>.Filter.Lt(t => t.BuyDate, tomorrow);
+
+                var swingSymbols = await _swingTransactions.Find(swingFilter)
+                    .Project(t => t.Symbol)
+                    .ToListAsync();
+
+                var uniqueSymbols = swingSymbols.Count;
+                _logger.LogInformation("Found {Count} unique stocks bought on {Date} (IST).", uniqueSymbols, today.ToString("yyyy-MM-dd"));
+                return uniqueSymbols;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error counting daily unique stocks: {Message}", ex.Message);
+                return 0;
+            }
+        }
+
+
+
         public async Task<int> GetOpenPositionCountAsync()
         {
-            var swingCount = await _swingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.SellDate, null));
-            var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.SellDate, null));
+            var swingCount = await _swingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
+            var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
             return (int)(swingCount + scalpingCount);
         }
 
