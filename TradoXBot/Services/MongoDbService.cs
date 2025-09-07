@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using System;
 using System.Collections.Generic;
@@ -12,16 +13,39 @@ namespace TradoXBot.Services
         private readonly IMongoCollection<Transaction> _swingTransactions;
         private readonly IMongoCollection<Transaction> _scalpingTransactions;
         private readonly IMongoCollection<ScannerStock> _scannerStocks;
+        private readonly ILogger<MongoDbService> _logger;
 
-        public MongoDbService(IConfiguration configuration)
+        public MongoDbService(IConfiguration configuration, ILogger<MongoDbService> logger)
         {
+            _logger = logger;
             var client = new MongoClient(configuration["MongoDb:ConnectionString"]);
             var database = client.GetDatabase(configuration["MongoDb:DatabaseName"]);
             _swingTransactions = database.GetCollection<Transaction>("SwingTransactions");
             _scalpingTransactions = database.GetCollection<Transaction>("ScalpingTransactions");
             _scannerStocks = database.GetCollection<ScannerStock>("ScannerStocks");
         }
+        public async Task<bool> HasOpenPositionAsync(string symbol)
+        {
+            try
+            {
+                var swingFilter = Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol) &
+                                 Builders<Transaction>.Filter.Eq(t => t.IsOpen, true);
+                var scalpingFilter = Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol) &
+                                    Builders<Transaction>.Filter.Eq(t => t.IsOpen, true);
 
+                var swingCount = await _swingTransactions.CountDocumentsAsync(swingFilter);
+                var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(scalpingFilter);
+
+                bool hasOpenPosition = swingCount > 0 || scalpingCount > 0;
+                _logger.LogInformation("Checked open position for {Symbol}: {HasOpenPosition}", symbol, hasOpenPosition);
+                return hasOpenPosition;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error checking open position for {Symbol}: {Message}", symbol, ex.Message);
+                return false;
+            }
+        }
         public async Task InsertSwingTransactionAsync(Transaction transaction)
         {
             transaction.Id = Guid.NewGuid().ToString();
@@ -46,7 +70,7 @@ namespace TradoXBot.Services
                 .Set(t => t.SellDate, sellDate)
                 .Set(t => t.SellPrice, sellPrice)
                 .Set(t => t.ProfitLoss, profitLoss)
-                .Set(t => t.ProfitLossPercentage, profitLossPercentage);
+                .Set(t => t.ProfitLossPct, profitLossPercentage);
 
             await collection.UpdateOneAsync(filter, update);
         }
@@ -59,7 +83,8 @@ namespace TradoXBot.Services
 
         public async Task<List<Transaction>> GetOpenSwingTransactionsAsync()
         {
-            var filter = Builders<Transaction>.Filter.Eq(t => t.SellDate, null);
+            var filter = Builders<Transaction>.Filter.Eq(t => t.SellDate, null) &
+                                 Builders<Transaction>.Filter.Eq(t => t.IsOpen, true); ;
             return await _swingTransactions.Find(filter).ToListAsync();
         }
 
@@ -106,7 +131,7 @@ namespace TradoXBot.Services
                 Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol),
                 Builders<Transaction>.Filter.Ne(t => t.SellDate, null),
                 Builders<Transaction>.Filter.Gte(t => t.SellDate, twentyTradingDaysAgo),
-                Builders<Transaction>.Filter.Gt(t => t.ProfitLossPercentage, 0)
+                Builders<Transaction>.Filter.Gt(t => t.ProfitLossPct, 0)
             );
 
             var swingCount = await _swingTransactions.CountDocumentsAsync(filter);
@@ -121,7 +146,7 @@ namespace TradoXBot.Services
                 Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol),
                 Builders<Transaction>.Filter.Ne(t => t.SellDate, null),
                 Builders<Transaction>.Filter.Eq(t => t.SellDate, today),
-                Builders<Transaction>.Filter.Gt(t => t.ProfitLossPercentage, 0)
+                Builders<Transaction>.Filter.Gt(t => t.ProfitLossPct, 0)
             );
 
             var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(filter);

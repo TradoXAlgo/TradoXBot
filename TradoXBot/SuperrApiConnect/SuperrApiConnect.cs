@@ -45,7 +45,7 @@ public class SuperrApi
         ["modify_order"] = "/orders/{variety}/{order_id}",
         ["cancel_order"] = "/orders/{variety}/{order_id}",
         ["fund_details"] = "/funds",
-        ["quotes"] = "/quotes/ohlc",
+        ["quotes"] = "/quotes",
         ["holding_details"] = "/portfolio/holdings",
         ["position_details"] = "/portfolio/positions",
 

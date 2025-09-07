@@ -41,7 +41,16 @@ public class BuyJob : IJob
                 _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Skipped due to month-end restriction.");
                 return;
             }
+            var now = DateTime.Now;
+            var marketOpen = new TimeSpan(9, 15, 0);
+            var marketClose = new TimeSpan(15, 30, 0);
+            // if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
+            // {
+            //     _logger.LogInformation("Buy Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
+            //     return;
+            // }
 
+            _logger.LogInformation("Executing Buy Job at {Time}", now);
             // Authenticate and check portfolio/funds
 
             var status = await _stoxKartClient.AuthenticateAsync();
@@ -79,7 +88,7 @@ public class BuyJob : IJob
             }
 
             var tokens = await _stoxKartClient.GetInstrumentTokensAsync("NSE");
-            foreach (var stock in  scannerStocks.Take(maxOrders))
+            foreach (var stock in scannerStocks.Take(maxOrders))
             {
                 // Skip stocks with recent profitable trades
                 if (await _mongoDbService.ShouldSkipStockAsync(stock.Symbol))
@@ -87,7 +96,12 @@ public class BuyJob : IJob
                     _logger.LogInformation($"Skipping {stock.Symbol} due to recent profitable trade.");
                     continue;
                 }
-
+                // Check for open position
+                if (await _mongoDbService.HasOpenPositionAsync(stock.Symbol))
+                {
+                    _logger.LogInformation("Skipping {Symbol}: Already has an open position.", stock.Symbol);
+                    continue;
+                }
                 // Check uptrend and breakout conditions
                 bool isUpTrend = await _historicalFetcher.IsUpTrendAsync(stock.Symbol);
                 bool isBreakout = await _historicalFetcher.IsBreakoutAsync(stock.Symbol);

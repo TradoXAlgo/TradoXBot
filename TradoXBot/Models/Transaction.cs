@@ -13,9 +13,10 @@ public class Transaction
     public DateTime? SellDate { get; set; }
     public decimal? SellPrice { get; set; }
     public decimal? ProfitLoss { get; set; }
-    public decimal? ProfitLossPercentage { get; set; }
+    public decimal? ProfitLossPct { get; set; }
     public decimal OpenPrice { get; set; }
     public decimal HighPrice { get; set; }
     public decimal LowPrice { get; set; }
     public decimal ClosePrice { get; set; }
+    public bool IsOpen { get; set; } = true;
 }

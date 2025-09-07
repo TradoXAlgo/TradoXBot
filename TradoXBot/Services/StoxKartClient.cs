@@ -171,22 +171,25 @@ public class StoxKartClient
             if (fundDerails["status"] == "success")
             {
                 var size = fundDerails["data"].Count;
-                var data = fundDerails["data"][0];
-                foreach (var token in tokens)
+                var data = fundDerails["data"];
+                foreach (var dataItem in data)
                 {
-                    if (data["token"] == token)
+                    foreach (var token in tokens)
                     {
-                        var quoteData = data;
-                        quotes[token] = new Quote
+                        if (dataItem["token"] == token)
                         {
-                            LastPrice = Convert.ToDecimal(quoteData["last_trade_price"]),
-                            PrevClose = Convert.ToDecimal(quoteData["ohlc"]["close"]),
-                            Open = Convert.ToDecimal(quoteData["ohlc"]["open"]),
-                            High = Convert.ToDecimal(quoteData["ohlc"]["high"]),
-                            Low = Convert.ToDecimal(quoteData["ohlc"]["low"]),
-                            Close = Convert.ToDecimal(quoteData["ohlc"]["close"]),
-                            Volume = Convert.ToInt64(quoteData["volume"])
-                        };
+                            var quoteData = dataItem;
+                            quotes[token] = new Quote
+                            {
+                                LastPrice = Convert.ToDecimal(quoteData["last_trade_price"]),
+                                PrevClose = Convert.ToDecimal(quoteData["ohlc"]["close"]),
+                                Open = Convert.ToDecimal(quoteData["ohlc"]["open"]),
+                                High = Convert.ToDecimal(quoteData["ohlc"]["high"]),
+                                Low = Convert.ToDecimal(quoteData["ohlc"]["low"]),
+                                Close = Convert.ToDecimal(quoteData["ohlc"]["close"]),
+                                Volume = Convert.ToInt64(quoteData["volume"])
+                            };
+                        }
                     }
                 }
                 //await size;
