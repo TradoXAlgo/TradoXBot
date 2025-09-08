@@ -30,6 +30,8 @@ public class TradingService : IHostedService
         IJobDetail buyJob = JobBuilder.Create<BuyJob>()
             .WithIdentity("BuyJob", "Trading")
             .Build();
+
+        // In Program.cs or Quartz setup
         ITrigger buyTrigger = TriggerBuilder.Create()
             .WithIdentity("BuyTrigger", "Trading")
             .WithDailyTimeIntervalSchedule(s => s
@@ -82,7 +84,26 @@ public class TradingService : IHostedService
                 .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 30))
                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time")))
             .Build();
+
+
         await _scheduler.ScheduleJob(statusJob, statusTrigger, cancellationToken);
+
+
+
+        var swingMonitorJob = JobBuilder.Create<SwingMonitorJob>()
+            .WithIdentity("SwingMonitorJob", "Trading")
+            .Build();
+
+        var swingMonitorTrigger = TriggerBuilder.Create()
+            .WithIdentity("SwingMonitorTrigger", "Trading")
+            .WithSchedule(CronScheduleBuilder.DailyAtHourAndMinute(9, 15)
+                .WithMisfireHandlingInstructionFireAndProceed()
+                .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time")))
+            .WithSimpleSchedule(x => x
+                .WithIntervalInMinutes(15)
+                .RepeatForever())
+            .Build();
+        await _scheduler.ScheduleJob(swingMonitorJob, swingMonitorTrigger);
 
         await _scheduler.Start(cancellationToken);
         _logger.LogInformation("Trading Service started with scheduled jobs.");

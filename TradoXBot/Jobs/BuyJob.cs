@@ -179,7 +179,9 @@ public class BuyJob : IJob
                     OpenPrice = ohlc?.Open ?? 0,
                     HighPrice = ohlc?.High ?? 0,
                     LowPrice = ohlc?.Low ?? 0,
-                    ClosePrice = ohlc?.Close ?? quote.LastPrice
+                    ClosePrice = ohlc?.Close ?? quote.LastPrice,
+                    IsOpen = true,
+                    TransactionType = "Swing"
                 };
                 await _mongoDbService.InsertSwingTransactionAsync(transaction);
                 await _mongoDbService.InsertScannerStockAsync(stock);

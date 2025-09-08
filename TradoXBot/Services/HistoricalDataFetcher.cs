@@ -100,7 +100,7 @@ namespace TradoXBot.Services
         public async Task<decimal?> GetEma7Async(string symbol) => await GetEmaAsync(symbol, 7, "5m");
         public async Task<decimal?> GetEma9Async(string symbol) => await GetEmaAsync(symbol, 9);
         public async Task<decimal?> GetEma21Async(string symbol) => await GetEmaAsync(symbol, 21);
-        public async Task<decimal?> GetEma50Async(string symbol) => await GetEmaAsync(symbol, 50);
+        public async Task<decimal?> GetEma50Async(string symbol) => await GetEmaAsync(symbol, 44);
 
         public async Task<decimal?> GetAtrAsync(string symbol, int period = 14, string interval = "1d")
         {
@@ -257,7 +257,7 @@ namespace TradoXBot.Services
                     return false;
                 }
 
-                return closePrices.Last() > upperBand && rsi > 60 && volumes.Last() > volumeSma;
+                return closePrices.Last() > upperBand && rsi > 50 && volumes.Last() > volumeSma;
             }
             catch (Exception ex)
             {

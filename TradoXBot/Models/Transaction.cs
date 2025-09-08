@@ -19,4 +19,13 @@ public class Transaction
     public decimal LowPrice { get; set; }
     public decimal ClosePrice { get; set; }
     public bool IsOpen { get; set; } = true;
+    public string? TransactionType { get; set; } // "Swing" or "Scalping"
+
+    public override string ToString()
+    {
+        return $"{StockName} ({Symbol}) - Buy: ₹{BuyPrice} on {BuyDate:yyyy-MM-dd}, Qty: {Quantity}, Expiry: {ExpiryDate:yyyy-MM-dd}, " +
+               $"Sell: {(SellPrice.HasValue ? $"₹{SellPrice} on {SellDate:yyyy-MM-dd}" : "N/A")}, " +
+               $"P/L: {(ProfitLoss.HasValue ? $"₹{ProfitLoss} ({ProfitLossPct:F2}%)" : "N/A")}, " +
+               $"Status: {(IsOpen ? "Open" : "Closed")}, Type: {TransactionType}";
+    }
 }

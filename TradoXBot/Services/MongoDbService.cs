@@ -63,14 +63,16 @@ namespace TradoXBot.Services
             var collection = collectionName == "SwingTransactions" ? _swingTransactions : _scalpingTransactions;
             var filter = Builders<Transaction>.Filter.And(
                 Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol),
-                Builders<Transaction>.Filter.Eq(t => t.SellDate, null)
+                Builders<Transaction>.Filter.Eq(t => t.SellDate, DateTime.Now),
+                Builders<Transaction>.Filter.Eq(t => t.IsOpen, false)
             );
 
             var update = Builders<Transaction>.Update
                 .Set(t => t.SellDate, sellDate)
                 .Set(t => t.SellPrice, sellPrice)
                 .Set(t => t.ProfitLoss, profitLoss)
-                .Set(t => t.ProfitLossPct, profitLossPercentage);
+                .Set(t => t.ProfitLossPct, profitLossPercentage)
+                .Set(t => t.IsOpen, false);
 
             await collection.UpdateOneAsync(filter, update);
         }
@@ -83,20 +85,21 @@ namespace TradoXBot.Services
 
         public async Task<List<Transaction>> GetOpenSwingTransactionsAsync()
         {
-            var filter = Builders<Transaction>.Filter.Eq(t => t.SellDate, null) &
-                                 Builders<Transaction>.Filter.Eq(t => t.IsOpen, true); ;
+            var filter = Builders<Transaction>.Filter.Eq(t => t.IsOpen, true) &
+                                  Builders<Transaction>.Filter.Eq(t => t.TransactionType, "Swing");
             return await _swingTransactions.Find(filter).ToListAsync();
         }
 
         public async Task<List<Transaction>> GetOpenScalpingTransactionsAsync()
         {
-            var filter = Builders<Transaction>.Filter.Eq(t => t.SellDate, null);
+            var filter = Builders<Transaction>.Filter.Eq(t => t.IsOpen, true) &
+                                 Builders<Transaction>.Filter.Eq(t => t.TransactionType, "Scalping");
             return await _scalpingTransactions.Find(filter).ToListAsync();
         }
 
         public async Task<List<Transaction>> GetClosedTransactionsAsync()
         {
-            var filter = Builders<Transaction>.Filter.Ne(t => t.SellDate, null);
+            var filter = Builders<Transaction>.Filter.Ne(t => t.IsOpen, false);
             var swingClosed = await _swingTransactions.Find(filter).ToListAsync();
             var scalpingClosed = await _scalpingTransactions.Find(filter).ToListAsync();
             swingClosed.AddRange(scalpingClosed);
@@ -145,14 +148,40 @@ namespace TradoXBot.Services
         }
 
 
-
+        public async Task<bool> WasStockBoughtAndSoldSameDayAsync(string symbol)
+        {
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var today = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone).Date;
+                var tomorrow = today.AddDays(1);
+                var filter = Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol);
+                Builders<Transaction>.Filter.Gte(t => t.BuyDate, today);
+                Builders<Transaction>.Filter.Lt(t => t.BuyDate, tomorrow);
+                Builders<Transaction>.Filter.Exists(t => t.SellDate);
+                Builders<Transaction>.Filter.Gte(t => t.SellDate, today);
+                Builders<Transaction>.Filter.Lt(t => t.SellDate, tomorrow);
+                var count = await _scalpingTransactions.CountDocumentsAsync(filter);
+                bool wasBoughtAndSold = count > 0;
+                _logger.LogInformation("Checked if {Symbol} was bought and sold today: {Result}", symbol, wasBoughtAndSold);
+                return wasBoughtAndSold;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error checking if {Symbol} was bought and sold today: {Message}", symbol, ex.Message);
+                return false;
+            }
+        }
         public async Task<int> GetOpenPositionCountAsync()
         {
             var swingCount = await _swingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
-            var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
-            return (int)(swingCount + scalpingCount);
+            return (int)swingCount;
         }
-
+        public async Task<int> GetScalpingpenPositionCountAsync()
+        {
+            var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
+            return (int)scalpingCount;
+        }
         public async Task<bool> ShouldSkipStockAsync(string symbol)
         {
             var twentyTradingDaysAgo = AddTradingDays(DateTime.Now, -20);

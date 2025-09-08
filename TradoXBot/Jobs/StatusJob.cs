@@ -18,7 +18,7 @@ public class StatusJob : IJob
     private readonly MongoDbService _mongoDbService;
     private readonly HistoricalDataFetcher _historicalFetcher;
     private readonly TelegramBotClient _telegramBot;
-    private readonly string _chatId;
+    private readonly string? _chatId;
 
     public StatusJob(IConfiguration configuration, ILogger<StatusJob> logger, StoxKartClient stoxKartClient, MongoDbService mongoDbService, HistoricalDataFetcher historicalFetcher)
     {
