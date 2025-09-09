@@ -34,36 +34,43 @@ public class BuyJob : IJob
         {
             _logger.LogInformation("Executing Swing Buy Job at {Time}", DateTime.Now);
 
-            // Skip if within 3 days of month-end
-            if (IsMonthEnd())
-            {
-                _logger.LogInformation("Skipping swing buy due to month-end restriction.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Skipped due to month-end restriction.");
-                return;
-            }
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
             var marketClose = new TimeSpan(15, 30, 0);
-            // if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
-            // {
-            //     _logger.LogInformation("Buy Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
-            //     return;
-            // }
+            var buyTime = new TimeSpan(15, 25, 0);
 
+            if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now) || now.TimeOfDay != buyTime)
+            {
+                _logger.LogInformation("Buy Job skipped: Outside market hours (9:15 AM - 3:30 PM IST), not a trading day, or not 3:25 PM IST.");
+                return;
+            }
 
-            _logger.LogInformation("Executing Buy Job at {Time}", now);
-            // Authenticate and check portfolio/funds
+            if (IsMonthEnd())
+            {
+                _logger.LogInformation("Buy Job skipped: Month-end (28th-31st).");
+                await _telegramBot.SendMessage(_chatId, "Buy Job: Skipped due to month-end.");
+                return;
+            }
 
-            var status = await _stoxKartClient.AuthenticateAsync();
+            _logger.LogInformation("Executing Buy Job at {Time} IST", now);
+
+            var status = _stoxKartClient.AuthenticateAsync();
             if (!status)
             {
                 _logger.LogError("Authentication failed. Aborting swing buy.");
                 _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
                 return;
             }
+            Console.WriteLine("Buy Jobs");
+            var availableFunds = await _stoxKartClient.GetFundsAsync();
+            if (availableFunds <= 20000)
+            {
+                _logger.LogWarning("Insufficient funds for swing buy (≤ ₹20,000).");
+                await _telegramBot.SendMessage(_chatId, "Buy Job: Insufficient funds (≤ ₹20,000).");
+                return;
+            }
 
-            var availableFunds = 100000;//await _stoxKartClient.GetFundsAsync();
             // var openCount = await _mongoDbService.GetOpenPositionCountAsync();
             // if (openCount >= 5)
             // {
@@ -79,6 +86,7 @@ public class BuyJob : IJob
                 await _telegramBot.SendMessage(_chatId, "Buy Job: Daily buy limit reached (5 unique stocks).");
                 return;
             }
+            // Calculate max orders based on available funds and daily limit    
 
             var maxOrders = Math.Min((int)(availableFunds / 20000), 5 - dailyStockCount);
             if (maxOrders <= 0)
@@ -93,31 +101,23 @@ public class BuyJob : IJob
             if (scannerStocks.Count == 0)
             {
                 _logger.LogWarning("No stocks found in Chartink scanner.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: No stocks found in scanner.");
+                _ = await _telegramBot.SendMessage(_chatId, "Buy Jobs: No stocks found in scanner.");
                 return;
             }
 
             var tokens = await _stoxKartClient.GetInstrumentTokensAsync("NSE");
             foreach (var stock in scannerStocks.Take(maxOrders))
             {
-                // Skip stocks with recent profitable trades
-                if (await _mongoDbService.ShouldSkipStockAsync(stock.Symbol))
-                {
-                    _logger.LogInformation($"Skipping {stock.Symbol} due to recent profitable trade.");
-                    continue;
-                }
                 // Check for open position
                 if (await _mongoDbService.HasOpenPositionAsync(stock.Symbol))
                 {
                     _logger.LogInformation("Skipping {Symbol}: Already has an open position.", stock.Symbol);
                     continue;
                 }
-                // Check uptrend and breakout conditions
-                bool isUpTrend = await _historicalFetcher.IsUpTrendAsync(stock.Symbol);
-                bool isBreakout = await _historicalFetcher.IsBreakoutAsync(stock.Symbol);
-                if (!isUpTrend || !isBreakout)
+
+                if (await _mongoDbService.WasStockSoldAtProfitRecentlyAsync(stock.Symbol))
                 {
-                    _logger.LogInformation($"Skipping {stock.Symbol}: Uptrend={isUpTrend}, Breakout={isBreakout}");
+                    _logger.LogInformation("Skipping {Symbol}: Sold at profit within 20 trading days.", stock.Symbol);
                     continue;
                 }
 
@@ -130,15 +130,27 @@ public class BuyJob : IJob
                     continue;
                 }
 
-                var quotes = await _stoxKartClient.GetQuotesAsync("NSE", new[] { token }.ToList());
+                var quotes = _stoxKartClient.GetQuotesAsync("NSE", new[] { token }.ToList());
                 if (!quotes.TryGetValue(token, out var quote))
                 {
-                    _logger.LogWarning($"No quote data for {stock.Symbol}. Skipping.");
+                    _logger.LogWarning("No quote data for {Symbol}. Skipping.", stock.Symbol);
+                    continue;
+                }
+
+                // Check uptrend and breakout conditions
+                bool isUptrend = await _historicalFetcher.IsPriceAboveEmaAsync(stock.Symbol, 50);
+                //bool isBreakout = await _historicalFetcher.IsBreakoutAsync(stock.Symbol);
+                bool isRsiValid = await _historicalFetcher.GetRsiAsync(stock.Symbol) > 50;
+                bool isVolumeValid = await _historicalFetcher.IsVolumeAboveSmaAsync(stock.Symbol, 20);
+
+                if (!isUptrend || !isRsiValid || !isVolumeValid)
+                {
+                    _logger.LogInformation("Skipping {Symbol}: Does not meet uptrend/breakout/RSI/volume criteria.", stock.Symbol);
                     continue;
                 }
 
                 // Calculate quantity based on 1% risk
-                decimal? atr = await _historicalFetcher.GetAtrAsync(stock.Symbol);
+                decimal? atr = await _historicalFetcher.GetAtrAsync(stock.Symbol, 14);
                 decimal riskPerShare = atr.HasValue ? atr.Value * 2 : quote.LastPrice * 0.025m;
                 decimal riskPerTrade = availableFunds * 0.01m;
                 int quantity = (int)(riskPerTrade / riskPerShare);
@@ -149,7 +161,7 @@ public class BuyJob : IJob
                 }
 
                 // Place buy order
-                var orderId = await _stoxKartClient.PlaceOrderAsync(
+                var orderId = _stoxKartClient.PlaceOrderAsync(
                     "BUY",
                     "NSE",
                     token,
@@ -160,7 +172,8 @@ public class BuyJob : IJob
                      );
                 if (string.IsNullOrEmpty(orderId))
                 {
-                    _logger.LogError($"Order placement failed for {stock.Symbol}. Skipping.");
+                    _logger.LogInformation("Swing bought {Symbol} (Qty: {Quantity}, Price: {Price:F2}). Order ID: {OrderId}",
+                        stock.Symbol, quantity, quote.LastPrice, orderId);
                     continue;
                 }
                 _logger.LogInformation($"Swing bought {stock.Symbol} (Qty: {quantity}, Price: {quote.LastPrice:F2}). Order ID: {orderId}");

@@ -1,6 +1,6 @@
 {
   "version": 2,
-  "dgSpecHash": "TPlOBb19l7s=",
+  "dgSpecHash": "XfVa8YOLpQQ=",
   "success": true,
   "projectFilePath": "/Users/yashsingh/Project/TradoXAI/TradoXBot/TradoXBot.csproj",
   "expectedPackageFiles": [
@@ -44,6 +44,8 @@
     "/Users/yashsingh/.nuget/packages/polly/8.6.3/polly.8.6.3.nupkg.sha512",
     "/Users/yashsingh/.nuget/packages/polly.core/8.6.3/polly.core.8.6.3.nupkg.sha512",
     "/Users/yashsingh/.nuget/packages/quartz/3.15.0/quartz.3.15.0.nupkg.sha512",
+    "/Users/yashsingh/.nuget/packages/quartz.extensions.dependencyinjection/3.15.0/quartz.extensions.dependencyinjection.3.15.0.nupkg.sha512",
+    "/Users/yashsingh/.nuget/packages/quartz.extensions.hosting/3.15.0/quartz.extensions.hosting.3.15.0.nupkg.sha512",
     "/Users/yashsingh/.nuget/packages/selenium.webdriver/4.35.0/selenium.webdriver.4.35.0.nupkg.sha512",
     "/Users/yashsingh/.nuget/packages/selenium.webdriver.chromedriver/140.0.7339.8000/selenium.webdriver.chromedriver.140.0.7339.8000.nupkg.sha512",
     "/Users/yashsingh/.nuget/packages/seleniumextras.waithelpers/1.0.2/seleniumextras.waithelpers.1.0.2.nupkg.sha512",

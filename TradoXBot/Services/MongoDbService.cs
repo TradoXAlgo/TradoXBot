@@ -23,6 +23,16 @@ namespace TradoXBot.Services
             _swingTransactions = database.GetCollection<Transaction>("SwingTransactions");
             _scalpingTransactions = database.GetCollection<Transaction>("ScalpingTransactions");
             _scannerStocks = database.GetCollection<ScannerStock>("ScannerStocks");
+
+            // Create indexes for performance
+            _swingTransactions.Indexes.CreateOne(new CreateIndexModel<Transaction>(
+                Builders<Transaction>.IndexKeys.Ascending(t => t.Symbol).Ascending(t => t.IsOpen)));
+            _scalpingTransactions.Indexes.CreateOne(new CreateIndexModel<Transaction>(
+                Builders<Transaction>.IndexKeys.Ascending(t => t.Symbol).Ascending(t => t.IsOpen)));
+            _swingTransactions.Indexes.CreateOne(new CreateIndexModel<Transaction>(
+                Builders<Transaction>.IndexKeys.Ascending(t => t.BuyDate)));
+            _scalpingTransactions.Indexes.CreateOne(new CreateIndexModel<Transaction>(
+                Builders<Transaction>.IndexKeys.Ascending(t => t.BuyDate)));
         }
         public async Task<bool> HasOpenPositionAsync(string symbol)
         {
@@ -48,23 +58,42 @@ namespace TradoXBot.Services
         }
         public async Task InsertSwingTransactionAsync(Transaction transaction)
         {
-            transaction.Id = Guid.NewGuid().ToString();
-            await _swingTransactions.InsertOneAsync(transaction);
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                transaction.BuyDate = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                await _swingTransactions.InsertOneAsync(transaction);
+                _logger.LogInformation("Inserted swing transaction for {Symbol} with BuyDate {BuyDate}",
+                    transaction.Symbol, transaction.BuyDate);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error inserting swing transaction for {Symbol}: {Message}", transaction.Symbol, ex.Message);
+            }
         }
 
         public async Task InsertScalpingTransactionAsync(Transaction transaction)
         {
-            transaction.Id = Guid.NewGuid().ToString();
-            await _scalpingTransactions.InsertOneAsync(transaction);
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                transaction.BuyDate = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                await _scalpingTransactions.InsertOneAsync(transaction);
+                _logger.LogInformation("Inserted scalping transaction for {Symbol} with BuyDate {BuyDate}",
+                    transaction.Symbol, transaction.BuyDate);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error inserting scalping transaction for {Symbol}: {Message}", transaction.Symbol, ex.Message);
+            }
         }
 
-        public async Task UpdateTransactionOnSellAsync(string collectionName, string symbol, DateTime sellDate, decimal sellPrice, decimal profitLoss, decimal profitLossPercentage)
+        public async Task UpdateTransactionOnSellAsync(string collectionName, string symbol, DateTime sellDate, decimal? sellPrice, decimal? profitLoss, decimal? profitLossPercentage)
         {
             var collection = collectionName == "SwingTransactions" ? _swingTransactions : _scalpingTransactions;
             var filter = Builders<Transaction>.Filter.And(
                 Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol),
-                Builders<Transaction>.Filter.Eq(t => t.SellDate, DateTime.Now),
-                Builders<Transaction>.Filter.Eq(t => t.IsOpen, false)
+                Builders<Transaction>.Filter.Eq(t => t.IsOpen, true)
             );
 
             var update = Builders<Transaction>.Update
@@ -85,16 +114,31 @@ namespace TradoXBot.Services
 
         public async Task<List<Transaction>> GetOpenSwingTransactionsAsync()
         {
-            var filter = Builders<Transaction>.Filter.Eq(t => t.IsOpen, true) &
-                                  Builders<Transaction>.Filter.Eq(t => t.TransactionType, "Swing");
-            return await _swingTransactions.Find(filter).ToListAsync();
+            try
+            {
+                return await _swingTransactions.Find(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true))
+                    .ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error getting open swing transactions: {Message}", ex.Message);
+                return new List<Transaction>();
+            }
+
         }
 
         public async Task<List<Transaction>> GetOpenScalpingTransactionsAsync()
         {
-            var filter = Builders<Transaction>.Filter.Eq(t => t.IsOpen, true) &
-                                 Builders<Transaction>.Filter.Eq(t => t.TransactionType, "Scalping");
-            return await _scalpingTransactions.Find(filter).ToListAsync();
+            try
+            {
+                return await _scalpingTransactions.Find(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true))
+                    .ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error getting open scalping transactions: {Message}", ex.Message);
+                return new List<Transaction>();
+            }
         }
 
         public async Task<List<Transaction>> GetClosedTransactionsAsync()
@@ -124,10 +168,13 @@ namespace TradoXBot.Services
         {
             try
             {
-                // Use IST for date comparison
-                var now = DateTime.UtcNow.AddHours(5.5); // Convert to IST
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
                 var today = now.Date;
                 var tomorrow = today.AddDays(1);
+
+                _logger.LogInformation("Checking unique stocks bought for date range: {Start} to {End} IST",
+                    today, tomorrow);
 
                 var swingFilter = Builders<Transaction>.Filter.Gte(t => t.BuyDate, today) &
                                  Builders<Transaction>.Filter.Lt(t => t.BuyDate, tomorrow);
@@ -147,6 +194,86 @@ namespace TradoXBot.Services
             }
         }
 
+        public async Task<int> GetScalpingniqueStocksBoughtAsync()
+        {
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                var today = now.Date;
+                var tomorrow = today.AddDays(1);
+
+                _logger.LogInformation("Checking unique stocks bought for date range: {Start} to {End} IST",
+                    today, tomorrow);
+
+                var scalpingFilter = Builders<Transaction>.Filter.Gte(t => t.BuyDate, today) &
+                                    Builders<Transaction>.Filter.Lt(t => t.BuyDate, tomorrow);
+
+                var scalpingSymbols = await _scalpingTransactions.Find(scalpingFilter)
+                    .Project(t => t.Symbol)
+                    .ToListAsync();
+
+                var uniqueSymbols = scalpingSymbols.Count;
+                _logger.LogInformation("Found {Count} unique stocks bought today: {Symbols}",
+                    uniqueSymbols, string.Join(", ", uniqueSymbols));
+                return uniqueSymbols;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error counting daily unique stocks: {Message}", ex.Message);
+                return 0;
+            }
+        }
+
+        public async Task<List<Transaction>> GetSwingTransactionsBoughtTodayAsync()
+        {
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                var today = now.Date;
+                var tomorrow = today.AddDays(1);
+
+                var filter = Builders<Transaction>.Filter.Eq(t => t.IsOpen, true) &
+                             Builders<Transaction>.Filter.Gte(t => t.BuyDate, today) &
+                             Builders<Transaction>.Filter.Lt(t => t.BuyDate, tomorrow);
+
+                var transactions = await _swingTransactions.Find(filter).ToListAsync();
+                _logger.LogInformation("Found {Count} swing transactions bought today: {Symbols}",
+                    transactions.Count, string.Join(", ", transactions.Select(t => t.Symbol)));
+                return transactions;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error getting swing transactions bought today: {Message}", ex.Message);
+                return new List<Transaction>();
+            }
+        }
+
+        public async Task<bool> WasStockSoldAtProfitRecentlyAsync(string symbol)
+        {
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                var today = now.Date;
+                var twentyTradingDaysAgo = SubtractTradingDays(now, 20);
+
+                var filter = Builders<Transaction>.Filter.Eq(t => t.Symbol, symbol) &
+                             Builders<Transaction>.Filter.Gte(t => t.SellDate, twentyTradingDaysAgo) &
+                             Builders<Transaction>.Filter.Lte(t => t.SellDate, today.AddDays(1)) &
+                             Builders<Transaction>.Filter.Gt(t => t.ProfitLoss, 0);
+
+                var swingCount = await _swingTransactions.CountDocumentsAsync(filter);
+                var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(filter);
+                return swingCount > 0 || scalpingCount > 0;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error checking recent profitable sale for {Symbol}: {Message}", symbol, ex.Message);
+                return false;
+            }
+        }
 
         public async Task<bool> WasStockBoughtAndSoldSameDayAsync(string symbol)
         {
@@ -179,8 +306,16 @@ namespace TradoXBot.Services
         }
         public async Task<int> GetScalpingpenPositionCountAsync()
         {
-            var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
-            return (int)scalpingCount;
+            try
+            {
+                var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(Builders<Transaction>.Filter.Eq(t => t.IsOpen, true));
+                return (int)scalpingCount;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error counting open scalping positions: {Message}", ex.Message);
+                return 0;
+            }
         }
         public async Task<bool> ShouldSkipStockAsync(string symbol)
         {
@@ -210,7 +345,18 @@ namespace TradoXBot.Services
             var scalpingCount = await _scalpingTransactions.CountDocumentsAsync(filter);
             return scalpingCount > 0;
         }
-
+        private DateTime SubtractTradingDays(DateTime date, int tradingDays)
+        {
+            var currentDate = date.Date;
+            int daysSubtracted = 0;
+            while (daysSubtracted < tradingDays)
+            {
+                currentDate = currentDate.AddDays(-1);
+                if (currentDate.DayOfWeek != DayOfWeek.Saturday && currentDate.DayOfWeek != DayOfWeek.Sunday && !Holidays.Contains(date.Date))
+                    daysSubtracted++;
+            }
+            return currentDate;
+        }
         private DateTime AddTradingDays(DateTime startDate, int tradingDays)
         {
             int daysToAdd = Math.Abs(tradingDays);
@@ -229,9 +375,28 @@ namespace TradoXBot.Services
             return resultDate;
         }
 
-        private bool IsTradingDay(DateTime date)
+
+        private static bool IsTradingDay(DateTime date)
         {
-            return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday;
+            return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday && !Holidays.Contains(date.Date);
         }
+
+        private static readonly List<DateTime> Holidays =
+        [
+            new DateTime(2025, 2, 26), // Mahashivratri
+        new DateTime(2025, 3, 14), // Holi
+        new DateTime(2025, 3, 31), // Eid-Ul-Fitr
+        new DateTime(2025, 4, 10), // Shri Mahavir Jayanti
+        new DateTime(2025, 4, 14), // Dr. Baba Saheb Ambedkar Jayanti
+        new DateTime(2025, 4, 18), // Good Friday
+        new DateTime(2025, 5, 1), // Maharashtra Day
+        new DateTime(2025, 8, 15), // Independence Day
+        new DateTime(2025, 8, 27), // Ganesh Chaturthi
+        new DateTime(2025, 10, 2), // Mahatma Gandhi Jayanti/Dussehra
+        new DateTime(2025, 10, 21), // Diwali Laxmi Pujan
+        new DateTime(2025, 10, 22), // Diwali-Balipratipada
+        new DateTime(2025, 11, 5), // Prakash Gurpurb Sri Guru Nanak Dev
+        new DateTime(2025, 12, 25) // Christmas
+        ];
     }
 }

@@ -53,9 +53,10 @@ public class TradingService : IHostedService
         await _scheduler.ScheduleJob(sellJob, sellTrigger, cancellationToken);
 
         // Schedule ScalpingMonitorJob (every 5 min, 9:15 AM - 2:30 PM IST)
-        IJobDetail scalpingJob = JobBuilder.Create<ScalpingMonitorJob>()
+        IJobDetail scalpingJob = JobBuilder.Create<ScalpingBuyJob>()
             .WithIdentity("ScalpingMonitorJob", "Trading")
             .Build();
+
         ITrigger scalpingTrigger = TriggerBuilder.Create()
             .WithIdentity("ScalpingTrigger", "Trading")
             .WithSchedule(SimpleScheduleBuilder.Create()
@@ -104,6 +105,22 @@ public class TradingService : IHostedService
                 .RepeatForever())
             .Build();
         await _scheduler.ScheduleJob(swingMonitorJob, swingMonitorTrigger);
+
+        var scalpingMonitorJob = JobBuilder.Create<ScalpingBuyJob>()
+        .WithIdentity("ScalpingMonitorJob", "Trading")
+        .Build();
+
+        var scalpingMonitorTrigger = TriggerBuilder.Create()
+            .WithIdentity("ScalpingMonitorTrigger", "Trading")
+            .WithSchedule(CronScheduleBuilder.DailyAtHourAndMinute(9, 15)
+                .WithMisfireHandlingInstructionFireAndProceed()
+                .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time")))
+            .WithSimpleSchedule(x => x
+                .WithIntervalInMinutes(1)
+                .RepeatForever())
+            .Build();
+        await _scheduler.ScheduleJob(scalpingMonitorJob, scalpingMonitorTrigger);
+
 
         await _scheduler.Start(cancellationToken);
         _logger.LogInformation("Trading Service started with scheduled jobs.");

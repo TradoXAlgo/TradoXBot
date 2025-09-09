@@ -37,19 +37,33 @@ public class SellJob : IJob
     {
         try
         {
+            var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+            var marketOpen = new TimeSpan(9, 15, 0);
+            var marketClose = new TimeSpan(15, 30, 0);
+            if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
+            {
+                _logger.LogInformation("Sell Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
+                return;
+            }
+
             _logger.LogInformation("Executing Swing Sell Job at {Time}", DateTime.Now);
-            await _stoxKartClient.AuthenticateAsync();
+            _stoxKartClient.AuthenticateAsync();
 
             var openTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
-            var scannerStocks = await _chartinkScraper.GetStocksAsync();
             var tokens = await _stoxKartClient.GetInstrumentTokensAsync("NSE");
+            var scannerStocks = await _chartinkScraper.GetStocksAsync();
+            var scannerSymbols = scannerStocks.Select(s => s.Symbol.ToUpper()).ToList();
+            var holdins = _stoxKartClient.GetPortfolioHoldingsAsync();
+            var holdingsSymbols = holdins.Select(h => h.Symbol.ToUpper()).ToHashSet();
 
             var quoteRequests = openTransactions
                 .Select(t => tokens.GetValueOrDefault(t.Symbol))
                 .Where(t => t != null)
                 .Distinct()
                 .ToList();
-            var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+
+            var quotes = _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new Dictionary<string, Quote>();
             foreach (var kv in quotes)
@@ -59,101 +73,172 @@ public class SellJob : IJob
                     symbolQuotes[symbol] = kv.Value;
             }
 
+            // Get transactions bought yesterday to check for 2%+ gain today
+            var yesterday = now.Date.AddDays(-1);
+            var transactionsBoughtYesterday = openTransactions
+                .Where(t => t.BuyDate.Date == yesterday)
+                .ToList();
+
             foreach (var transaction in openTransactions)
             {
+                // Check if stock is available in portfolio holdings
+                if (!holdingsSymbols.Contains(transaction.Symbol.ToUpper()))
+                {
+                    _logger.LogInformation("Skipping {Symbol}: Not available in portfolio holdings.", transaction.Symbol);
+                    continue;
+                }
                 if (!symbolQuotes.TryGetValue(transaction.Symbol, out var quote))
                 {
-                    _logger.LogWarning($"No quote data for {transaction.Symbol}. Skipping sell check.");
+                    _logger.LogWarning("No quote data for {Symbol}. Skipping sell check.", transaction.Symbol);
                     continue;
                 }
 
+                if (scannerSymbols.Contains(transaction.Symbol.ToUpper()))
+                {
+                    transaction.ExpiryDate = AddTradingDays(transaction.ExpiryDate, 1);
+                    await _mongoDbService.UpdateTransactionOnSellAsync("SwingTransactions", transaction.Symbol,
+                        transaction.ExpiryDate, transaction.SellPrice, transaction.ProfitLoss, transaction.ProfitLossPct);
+                    _logger.LogInformation("Extended expiry for {Symbol} by 1 trading day (in Chartink scanner).", transaction.Symbol);
+                    continue;
+                }
                 decimal profitPercent = (quote.LastPrice - transaction.BuyPrice) / transaction.BuyPrice * 100;
                 bool sell = false;
                 string sellReason = "";
-                decimal? atr = await _historicalFetcher.GetAtrAsync(transaction.Symbol);
-                decimal stopLossPrice = transaction.BuyPrice - (atr.HasValue ? atr.Value * 2 : transaction.BuyPrice * 0.025m);
 
-                if (profitPercent >= 10)
+                decimal? atr = await _historicalFetcher.GetAtrAsync(transaction.Symbol, 14);
+                decimal stopLossPrice = transaction.BuyPrice - (atr.HasValue ? 2 * atr.Value : transaction.BuyPrice * 0.025m);
+                decimal trailingStopLoss = profitPercent > 5 ? transaction.BuyPrice + (transaction.BuyPrice * 0.02m) : stopLossPrice;
+
+                bool isEma5Confirmed = quote.Open < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 5) &&
+                                       quote.Close < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 5) &&
+                                       quote.Close < quote.Open;
+
+                bool isEma9Confirmed = quote.Open < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 9) &&
+                                       quote.Close < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 9) &&
+                                       quote.Close < quote.Open;
+
+                bool isVolumeDrop = await _historicalFetcher.IsVolumeBelowSmaAsync(transaction.Symbol, 20) &&
+                                    quote.LastPrice < transaction.BuyPrice &&
+                                    now.Date > transaction.BuyDate.Date;
+
+                if (transactionsBoughtYesterday.Any(t => t.Symbol == transaction.Symbol) && profitPercent >= 2)
+                {
+                    sell = true;
+                    sellReason = ">2% profit since yesterday";
+                }
+                else if (transaction.ExpiryDate <= now)
+                {
+                    sell = true;
+                    sellReason = "Position expired";
+                }
+                else if (profitPercent >= 10)
                 {
                     sell = true;
                     sellReason = ">10% profit";
                 }
-                else if (DateTime.Now.Date >= transaction.ExpiryDate.Date && !scannerStocks.Any(s => s.Symbol == transaction.Symbol))
+                else if (quote.LastPrice < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 21))
                 {
                     sell = true;
-                    sellReason = "expired and not in scanner";
+                    sellReason = "Price below EMA21";
                 }
-                else if (quote.LastPrice < stopLossPrice)
+                else if (quote.LastPrice <= trailingStopLoss && isEma5Confirmed)
                 {
                     sell = true;
-                    sellReason = "hit stop-loss (2x ATR or 2.5%)";
+                    sellReason = profitPercent > 5 ? "Trailing stop-loss (entry + 2%)" : "Stop-loss (2x ATR or 2.5%)";
+                }
+                else if (isVolumeDrop)
+                {
+                    sell = true;
+                    sellReason = "Volume drop below 20-day SMA and price below entry";
+                }
+                else if (isEma9Confirmed)
+                {
+                    sell = true;
+                    sellReason = "Close below EMA9";
+                }
+                else if (quote.LastPrice <= trailingStopLoss)
+                {
+                    sell = true;
+                    sellReason = profitPercent > 5 ? "trailing stop-loss (5% profit)" : "hit stop-loss (2x ATR or 2.5%)";
+                }
+
+                else if (isEma5Confirmed)
+                {
+                    sell = true;
+                    sellReason = "below EMA5 (confirmed candle)";
+                }
+                else if (isEma9Confirmed)
+                {
+                    sell = true;
+                    sellReason = "below EMA9 (confirmed candle)";
+                }
+                else if (isVolumeDrop)
+                {
+                    sell = true;
+                    sellReason = "volume drop below SMA20 with price decline";
+                }
+
+                // Check for 2%+ gain for stocks bought yesterday
+                if (profitPercent >= 5)
+                {
+                    sell = true;
+                    sellReason = ">5% profit since yesterday";
+                }
+
+                // Check for 2%+ gain for stocks bought yesterday
+                if (profitPercent >= 2)
+                {
+                    sell = true;
+                    sellReason = ">2% profit since yesterday";
+                }
+                // Add other existing sell conditions here (e.g., stop-loss, expiry)
+                else if (transaction.ExpiryDate <= now)
+                {
+                    sell = true;
+                    sellReason = "Position expired";
                 }
                 else
                 {
-                    var ema21 = await _historicalFetcher.GetEma21Async(transaction.Symbol);
-                    var ema9 = await _historicalFetcher.GetEma9Async(transaction.Symbol);
-                    var ema5 = await _historicalFetcher.GetEma5Async(transaction.Symbol);
-                    var ohlc = await _historicalFetcher.GetTodaysOhlcAsync(transaction.Symbol);
-                    var volumeSma = await _historicalFetcher.GetVolumeSmaAsync(transaction.Symbol);
-
-                    if (ema21.HasValue && quote.LastPrice < ema21.Value)
+                    if (quote.LastPrice <= stopLossPrice)
                     {
                         sell = true;
-                        sellReason = "below EMA21";
+                        sellReason = "Hit stop-loss (ATR-based)";
                     }
-                    else if (ema9.HasValue && ema5.HasValue && ohlc != null &&
-                             ohlc.Close < ema9.Value && ohlc.Close < ohlc.Open &&
-                             ohlc.Close < ema5.Value && ohlc.Volume < volumeSma)
-                    {
-                        sell = true;
-                        sellReason = "hybrid EMA9 stop-loss";
-                    }
-                }
-
-                if (profitPercent > 5)
-                {
-                    decimal trailingStop = transaction.BuyPrice + (transaction.BuyPrice * 0.02m);
-                    if (quote.LastPrice < trailingStop)
-                    {
-                        sell = true;
-                        sellReason = "trailing stop-loss (5% profit)";
-                    }
-                }
-
-                if (scannerStocks.Any(s => s.Symbol == transaction.Symbol))
-                {
-                    await _mongoDbService.UpdateTransactionExpiryAsync("SwingTransactions", transaction.Symbol, AddTradingDays(DateTime.Now, 10));
-                    _logger.LogInformation($"Extended expiry for {transaction.Symbol} to {AddTradingDays(DateTime.Now, 10):yyyy-MM-dd}");
-                    continue;
                 }
 
                 if (sell)
                 {
-                    var token = tokens.GetValueOrDefault(transaction.Symbol);
+                    var token = tokens.GetValueOrDefault(transaction.Symbol.ToUpper());
                     if (token == null)
                     {
-                        _logger.LogWarning($"No token found for {transaction.Symbol}. Skipping sell.");
+                        _logger.LogWarning("No token found for {Symbol}. Skipping sell.", transaction.Symbol);
                         continue;
                     }
 
-                    var orderId = await _stoxKartClient.PlaceOrderAsync("SELL", "NSE", token, "MARKET", "DELIVERY", transaction.Quantity, 0);
-                    _logger.LogInformation($"Swing sold {transaction.Symbol}. Order ID: {orderId}");
+                    var orderId = _stoxKartClient.PlaceOrderAsync("SELL", "NSE", token, "LIMIT", "CNC", transaction.Quantity, quote.LastPrice);
+                    _logger.LogInformation("Swing sold {Symbol}. Order ID: {OrderId}", transaction.Symbol, orderId);
 
                     decimal profitLossAmount = (quote.LastPrice - transaction.BuyPrice) * transaction.Quantity;
                     decimal profitLossPct = profitPercent;
-                    await _mongoDbService.UpdateTransactionOnSellAsync("SwingTransactions", transaction.Symbol, DateTime.Now, quote.LastPrice, profitLossAmount, profitLossPct);
+                    await _mongoDbService.UpdateTransactionOnSellAsync("SwingTransactions", transaction.Symbol,
+                        TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone),
+                        quote.LastPrice, profitLossAmount, profitLossPct);
 
                     string sellMessage = $"Swing Stock Sold:\n" +
-                                         $"Name: {transaction.StockName}\n" +
-                                         $"Symbol: {transaction.Symbol}\n" +
-                                         $"Buy Date: {transaction.BuyDate:yyyy-MM-dd HH:mm}\n" +
-                                         $"Buy Price: ₹{transaction.BuyPrice:F2}\n" +
-                                         $"Sell Price: ₹{quote.LastPrice:F2}\n" +
-                                         $"Profit/Loss: ₹{profitLossAmount:F2} ({profitLossPct:F2}%)\n" +
-                                         $"Reason: {sellReason}";
+                                        $"Name: {transaction.StockName}\n" +
+                                        $"Symbol: {transaction.Symbol}\n" +
+                                        $"Buy Time: {transaction.BuyDate:yyyy-MM-dd HH:mm} IST\n" +
+                                        $"Buy Price: ₹{transaction.BuyPrice:F2}\n" +
+                                        $"Sell Price: ₹{quote.LastPrice:F2}\n" +
+                                        $"Profit/Loss: ₹{profitLossAmount:F2} ({profitLossPct:F2}%)\n" +
+                                        $"Reason: {sellReason}";
+
                     await _telegramBot.SendMessage(_chatId, sellMessage);
                 }
             }
+            // Status report for all open positions after sell checks
+            //var statusJob = new StatusJob(_stoxKartClient, _mongoDbService, _telegramBot, _logger, _chatId);
+            //await statusJob.Execute(null);
         }
         catch (Exception ex)
         {

@@ -66,3 +66,5 @@
 /Users/yashsingh/Project/TradoXAI/TradoXBot/bin/Debug/net9.0/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.Messages.dll
 /Users/yashsingh/Project/TradoXAI/TradoXBot/bin/Debug/net9.0/runtimes/win/lib/net9.0/System.Diagnostics.EventLog.dll
 /Users/yashsingh/Project/TradoXAI/TradoXBot/obj/Debug/net9.0/TradoXBot.sourcelink.json
+/Users/yashsingh/Project/TradoXAI/TradoXBot/bin/Debug/net9.0/Quartz.Extensions.DependencyInjection.dll
+/Users/yashsingh/Project/TradoXAI/TradoXBot/bin/Debug/net9.0/Quartz.Extensions.Hosting.dll

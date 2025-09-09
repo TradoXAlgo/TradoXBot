@@ -780,6 +780,41 @@
           }
         }
       },
+      "Quartz.Extensions.DependencyInjection/3.15.0": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Configuration.Abstractions": "9.0.0",
+          "Microsoft.Extensions.Options": "9.0.0",
+          "Quartz": "3.15.0"
+        },
+        "compile": {
+          "lib/net9.0/Quartz.Extensions.DependencyInjection.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Quartz.Extensions.DependencyInjection.dll": {
+            "related": ".xml"
+          }
+        }
+      },
+      "Quartz.Extensions.Hosting/3.15.0": {
+        "type": "package",
+        "dependencies": {
+          "Microsoft.Extensions.Hosting.Abstractions": "9.0.0",
+          "Quartz.Extensions.DependencyInjection": "3.15.0"
+        },
+        "compile": {
+          "lib/net9.0/Quartz.Extensions.Hosting.dll": {
+            "related": ".xml"
+          }
+        },
+        "runtime": {
+          "lib/net9.0/Quartz.Extensions.Hosting.dll": {
+            "related": ".xml"
+          }
+        }
+      },
       "Selenium.WebDriver/4.35.0": {
         "type": "package",
         "compile": {
@@ -2207,6 +2242,44 @@
         "quick-start.md"
       ]
     },
+    "Quartz.Extensions.DependencyInjection/3.15.0": {
+      "sha512": "4g+QSG84cHlffLXoiHC7I/zkw223GUtdj0ZYrY+sxYq45Dd3Rti4uKIn0dWeotyEiJZNpn028bspf8njSJdnUg==",
+      "type": "package",
+      "path": "quartz.extensions.dependencyinjection/3.15.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "lib/net8.0/Quartz.Extensions.DependencyInjection.dll",
+        "lib/net8.0/Quartz.Extensions.DependencyInjection.xml",
+        "lib/net9.0/Quartz.Extensions.DependencyInjection.dll",
+        "lib/net9.0/Quartz.Extensions.DependencyInjection.xml",
+        "lib/netstandard2.0/Quartz.Extensions.DependencyInjection.dll",
+        "lib/netstandard2.0/Quartz.Extensions.DependencyInjection.xml",
+        "microsoft-di-integration.md",
+        "quartz-logo-small.png",
+        "quartz.extensions.dependencyinjection.3.15.0.nupkg.sha512",
+        "quartz.extensions.dependencyinjection.nuspec"
+      ]
+    },
+    "Quartz.Extensions.Hosting/3.15.0": {
+      "sha512": "p9Fy67yAXxwjL/FxfVtmxwXbVtMOVZX+hNnONKT11adugK6kqgdfYvb0IP5pBBHW1rJSq88MpNkQ0EkyMCUhWg==",
+      "type": "package",
+      "path": "quartz.extensions.hosting/3.15.0",
+      "files": [
+        ".nupkg.metadata",
+        ".signature.p7s",
+        "hosted-services-integration.md",
+        "lib/net8.0/Quartz.Extensions.Hosting.dll",
+        "lib/net8.0/Quartz.Extensions.Hosting.xml",
+        "lib/net9.0/Quartz.Extensions.Hosting.dll",
+        "lib/net9.0/Quartz.Extensions.Hosting.xml",
+        "lib/netstandard2.0/Quartz.Extensions.Hosting.dll",
+        "lib/netstandard2.0/Quartz.Extensions.Hosting.xml",
+        "quartz-logo-small.png",
+        "quartz.extensions.hosting.3.15.0.nupkg.sha512",
+        "quartz.extensions.hosting.nuspec"
+      ]
+    },
     "Selenium.WebDriver/4.35.0": {
       "sha512": "C9OrObS2KLyUQDJNRY883JAc4n5q58pBYmY954hf+lGMQQcsz4Ias2mk91lHkLXFX+2qMttya4df9lGP1SLiGQ==",
       "type": "package",
@@ -2690,6 +2763,7 @@
       "MongoDB.Driver >= 3.4.3",
       "Polly >= 8.6.3",
       "Quartz >= 3.15.0",
+      "Quartz.Extensions.Hosting >= 3.15.0",
       "Selenium.WebDriver >= 4.35.0",
       "Selenium.WebDriver.ChromeDriver >= 140.0.7339.8000",
       "SeleniumExtras.WaitHelpers >= 1.0.2",
@@ -2770,6 +2844,10 @@
             "version": "[8.6.3, )"
           },
           "Quartz": {
+            "target": "Package",
+            "version": "[3.15.0, )"
+          },
+          "Quartz.Extensions.Hosting": {
             "target": "Package",
             "version": "[3.15.0, )"
           },

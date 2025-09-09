@@ -35,7 +35,14 @@ public class StatusJob : IJob
         try
         {
             _logger.LogInformation("Executing Status Job at {Time}", DateTime.Now);
-            await _stoxKartClient.AuthenticateAsync();
+
+            var status = _stoxKartClient.AuthenticateAsync();
+            if (!status)
+            {
+                _logger.LogError("Authentication failed. Aborting swing buy.");
+                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
+                return;
+            }
 
             var swingTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
             var scalpingTransactions = await _mongoDbService.GetOpenScalpingTransactionsAsync();
@@ -46,7 +53,7 @@ public class StatusJob : IJob
                 .Where(t => t != null)
                 .Distinct()
                 .ToList();
-            var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+            var quotes = _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new System.Collections.Generic.Dictionary<string, Quote>();
             foreach (var kv in quotes)

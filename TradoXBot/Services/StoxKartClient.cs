@@ -52,7 +52,7 @@ public class StoxKartClient
             });
     }
 
-    public async Task<bool> AuthenticateAsync()
+    public bool AuthenticateAsync()
     {
         CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         if (!string.IsNullOrEmpty(_accessToken))
@@ -62,10 +62,10 @@ public class StoxKartClient
         }
         try
         {
-            Task<bool> status = Task.Run(() => _superrApi.LoginAndSetAccessToken(), cts.Token);
-            if (!await status)
+            bool status = _superrApi.LoginAndSetAccessToken();
+            if (status)
             {
-                return await status;
+                return status;
             }
             _accessToken = _superrApi.GetAccessToken()?.ToString();
             if (string.IsNullOrEmpty(_accessToken))
@@ -76,7 +76,7 @@ public class StoxKartClient
             _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _accessToken);
             _httpClient.DefaultRequestHeaders.Add("X-API-Key", _apiKey);
             _logger.LogInformation("Successfully authenticated with StoxKart API.");
-            return await status;
+            return status;
         }
         catch (Exception ex)
         {
@@ -111,17 +111,18 @@ public class StoxKartClient
         return fundDerails["data"].Count > 0 ? Convert.ToDecimal(fundDerails["data"]["available_limit"]) : 0;
     }
 
-    public async Task<string> PlaceOrderAsync(string action, string exchange, string token, string orderType, string productType, int quantity, decimal price)
+    public string PlaceOrderAsync(string action, string exchange, string token, string orderType, string productType, int quantity, decimal price)
     {
-        await AuthenticateAsync();
+        AuthenticateAsync();
+
         if (string.IsNullOrEmpty(_accessToken))
         {
             _logger.LogError("Not authenticated. Call AuthenticateAsync first.");
             throw new Exception("Not authenticated.");
         }
         CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        Task<Dictionary<string, dynamic>> PlaceOrderResponse = Task.Run(() => _superrApi.PlaceOrder(
-                        variety: "AMO",
+        Dictionary<string, dynamic> PlaceOrderResponse = _superrApi.PlaceOrder(
+                        variety: "NORMAL", //AMO-NORMAL
                         action: action,
                         exchange: exchange,
                         token: token,
@@ -135,8 +136,8 @@ public class StoxKartClient
                         trailing_stop_loss: "0",
                         validity: "DAY",
                         tag: ""
-                    ), cts.Token);
-        var PlaceOrderRes = await PlaceOrderResponse;
+                    );
+        var PlaceOrderRes = PlaceOrderResponse;
 
         if (PlaceOrderRes["status"] == "success")
         {
@@ -149,11 +150,12 @@ public class StoxKartClient
         return PlaceOrderRes["data"]["order_id"];
     }
 
-    public async Task<Dictionary<string, Quote>> GetQuotesAsync(string exchange, List<string> tokens)
+    public Dictionary<string, Quote> GetQuotesAsync(string exchange, List<string> tokens)
     {
         try
         {
             if (string.IsNullOrEmpty(_accessToken)) throw new Exception("Authenticate first.");
+            AuthenticateAsync();
 
             if (tokens == null || tokens.Count == 0)
             {
@@ -164,9 +166,9 @@ public class StoxKartClient
             var quotes = new Dictionary<string, Quote>();
 
             CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-            Task<Dictionary<string, dynamic>> FundDetailsResponse = Task.Run(() => _superrApi.GetQuotes(exchange, tokens), cts.Token);
+            Dictionary<string, dynamic> FundDetailsResponse = _superrApi.GetQuotes(exchange, tokens);
 
-            var fundDerails = await FundDetailsResponse;
+            var fundDerails = FundDetailsResponse;
 
             if (fundDerails["status"] == "success")
             {
@@ -253,42 +255,80 @@ public class StoxKartClient
         }
     }
 
-    public async Task<Dictionary<string, string>> GetHoldingAsync(string exchange)
+    public List<PortfolioHolding> GetPortfolioHoldingsAsync()
     {
-        var tokens = new Dictionary<string, string>();
-        CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
-        if (string.IsNullOrEmpty(_accessToken))
-        {
-            _logger.LogError("Not authenticated. Call AuthenticateAsync first.");
-            throw new Exception("Not authenticated.");
-        }
-        Task<Dictionary<string, dynamic>> holdingDetailsResponse = Task.Run(() => _superrApi.HoldingDetails(), cts.Token);
+        //var tokens = new Dictionary<string, string>();
+        var portfolioHoldings = new List<PortfolioHolding>();
+        AuthenticateAsync();
 
-        var holdings = await holdingDetailsResponse;
+        Dictionary<string, dynamic> holdingDetailsResponse = _superrApi.HoldingDetails();
 
-        if (holdings["status"] == "success")
+        if (holdingDetailsResponse["status"] == "success")
         {
-            var size = holdings["data"].Count;
+            var size = holdingDetailsResponse["data"].Count;
             if (size > 0)
             {
-                foreach (var record in holdings["data"])
+                foreach (var record in holdingDetailsResponse["data"])
                 {
                     var recordCount = record.Count;
                     if (recordCount > 0)
                     {
 
-                        var key = record["nse_symbol"];
-                        var value = record["nse_token"];
-                        tokens[key] = value;
+                        portfolioHoldings.Add(new PortfolioHolding
+                        {
+                            Symbol = record["nse_symbol"].ToString(),
+                            Token = record["nse_token"].ToString(),
+                            Quantity = int.Parse(record["quantity"].ToString()),
+                            AvgPrice = decimal.Parse(record["average_price"].ToString())
+                        });
                     }
                 }
+                _logger.LogInformation("Retrieved {Count} portfolio holdings.", portfolioHoldings.Count);
             }
             else
             {
-                Console.WriteLine("Fund Details Transaction Failed ::" + holdings["message"]);
+                Console.WriteLine("Fund Details Transaction Failed ::" + holdingDetailsResponse["message"]);
             }
         }
-        return tokens;
+        return portfolioHoldings;
+    }
+
+    public List<PortfolioHolding> GetPositionAsync()
+    {
+        //var tokens = new Dictionary<string, string>();
+        var portfolioHoldings = new List<PortfolioHolding>();
+        AuthenticateAsync();
+
+        Dictionary<string, dynamic> holdingDetailsResponse = _superrApi.PositionDetails();
+
+        if (holdingDetailsResponse["status"] == "success")
+        {
+            var size = holdingDetailsResponse["data"].Count;
+            if (size > 0)
+            {
+                foreach (var record in holdingDetailsResponse["data"])
+                {
+                    var recordCount = record.Count;
+                    if (recordCount > 0)
+                    {
+
+                        portfolioHoldings.Add(new PortfolioHolding
+                        {
+                            Symbol = record["nse_symbol"].ToString(),
+                            Token = record["nse_token"].ToString(),
+                            Quantity = int.Parse(record["buy_quantity"].ToString()),
+                            AvgPrice = decimal.Parse(record["buy_average_price"].ToString())
+                        });
+                    }
+                }
+                _logger.LogInformation("Retrieved {Count} portfolio holdings.", portfolioHoldings.Count);
+            }
+            else
+            {
+                Console.WriteLine("Fund Details Transaction Failed ::" + holdingDetailsResponse["message"]);
+            }
+        }
+        return portfolioHoldings;
     }
 }
 

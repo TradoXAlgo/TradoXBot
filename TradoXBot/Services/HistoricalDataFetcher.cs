@@ -2,306 +2,392 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net.Http;
-using System.Text.Json;
 using System.Threading.Tasks;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Polly;
 using TradoXBot.Models;
+using Newtonsoft.Json.Linq;
+using Telegram.Bot;
+using System.Text.Json;
 
-namespace TradoXBot.Services
+namespace TradoXBot.Services;
+
+public class HistoricalDataFetcher
 {
-    public class HistoricalDataFetcher
+    private readonly ILogger<HistoricalDataFetcher> _logger;
+    private readonly IConfiguration _configuration;
+    private readonly IAsyncPolicy _retryPolicy;
+    private readonly TimeZoneInfo _istTimeZone;
+    private readonly HttpClient _httpClient;
+    private const string BaseUrl = "https://query1.finance.yahoo.com/v7/finance/chart/";
+
+    public HistoricalDataFetcher(IConfiguration configuration, ILogger<HistoricalDataFetcher> logger)
     {
-        private readonly ILogger<HistoricalDataFetcher> _logger;
-        private readonly HttpClient _httpClient;
-
-        public HistoricalDataFetcher(ILogger<HistoricalDataFetcher> logger)
-        {
-            _logger = logger;
-            _httpClient = new HttpClient();
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36");
-        }
-
-        public async Task<List<Ohlc>> FetchHistoricalDataAsync(string symbol, string range, string interval)
-        {
-            try
-            {
-                var url = $"https://query1.finance.yahoo.com/v7/finance/chart/{symbol}.NS?range={range}&interval={interval}&indicators=quote&includeTimestamps=true";
-                var response = await _httpClient.GetAsync(url);
-                response.EnsureSuccessStatusCode();
-                var json = await response.Content.ReadAsStringAsync();
-
-                using var doc = JsonDocument.Parse(json);
-                var chart = doc.RootElement.GetProperty("chart");
-                var result = chart.GetProperty("result")[0];
-                var timestamps = result.GetProperty("timestamp").EnumerateArray().Select(t => DateTimeOffset.FromUnixTimeSeconds(t.GetInt64()).DateTime).ToList();
-                var indicators = result.GetProperty("indicators").GetProperty("quote")[0];
-
-                var opens = indicators.GetProperty("open").EnumerateArray().Select(o => o.ValueKind == JsonValueKind.Null ? 0m : o.GetDecimal()).ToList();
-                var highs = indicators.GetProperty("high").EnumerateArray().Select(h => h.ValueKind == JsonValueKind.Null ? 0m : h.GetDecimal()).ToList();
-                var lows = indicators.GetProperty("low").EnumerateArray().Select(l => l.ValueKind == JsonValueKind.Null ? 0m : l.GetDecimal()).ToList();
-                var closes = indicators.GetProperty("close").EnumerateArray().Select(c => c.ValueKind == JsonValueKind.Null ? 0m : c.GetDecimal()).ToList();
-                var volumes = indicators.GetProperty("volume").EnumerateArray().Select(v => v.ValueKind == JsonValueKind.Null ? 0L : v.GetInt64()).ToList();
-
-                var ohlcList = new List<Ohlc>();
-                for (int i = 0; i < timestamps.Count; i++)
+        _configuration = configuration;
+        _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
+        _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
+        _logger = logger;
+        _istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+        _retryPolicy = Policy.Handle<HttpRequestException>()
+            .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
+                (exception, timeSpan, retryCount, context) =>
                 {
-                    if (closes[i] == 0) continue; // Skip invalid data
-                    ohlcList.Add(new Ohlc
-                    {
-                        Timestamp = timestamps[i],
-                        Open = opens[i],
-                        High = highs[i],
-                        Low = lows[i],
-                        Close = closes[i],
-                        Volume = volumes[i]
-                    });
-                }
-
-                return ohlcList.OrderBy(o => o.Timestamp).ToList();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error fetching historical data for {symbol} (range: {range}, interval: {interval}): {ex.Message}");
-                return new List<Ohlc>();
-            }
-        }
-
-        public async Task<decimal?> GetEmaAsync(string symbol, int period, string interval = "1d")
-        {
-            try
-            {
-                var range = interval == "1d" ? "3mo" : "7d"; //3mo
-                var historical = await FetchHistoricalDataAsync(symbol, range, interval);
-                var closePrices = historical.Select(r => r.Close).ToList();
-                if (closePrices.Count < period)
-                {
-                    _logger.LogWarning($"Not enough data for EMA {period} on {symbol}. Found {closePrices.Count} periods.");
-                    return null;
-                }
-
-                decimal multiplier = 2m / (period + 1);
-                decimal sma = closePrices.Take(period).Average();
-                decimal ema = sma;
-                for (int i = period; i < closePrices.Count; i++)
-                {
-                    ema = (closePrices[i] * multiplier) + (ema * (1 - multiplier));
-                }
-
-                return ema;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error calculating EMA for {symbol}: {ex.Message}");
-                return null;
-            }
-        }
-
-        public async Task<decimal?> GetEma5Async(string symbol) => await GetEmaAsync(symbol, 5);
-        public async Task<decimal?> GetEma7Async(string symbol) => await GetEmaAsync(symbol, 7, "5m");
-        public async Task<decimal?> GetEma9Async(string symbol) => await GetEmaAsync(symbol, 9);
-        public async Task<decimal?> GetEma21Async(string symbol) => await GetEmaAsync(symbol, 21);
-        public async Task<decimal?> GetEma50Async(string symbol) => await GetEmaAsync(symbol, 44);
-
-        public async Task<decimal?> GetAtrAsync(string symbol, int period = 14, string interval = "1d")
-        {
-            try
-            {
-                var range = interval == "1d" ? "1mo" : "7d";
-                var historical = await FetchHistoricalDataAsync(symbol, range, interval);
-                var highPrices = historical.Select(r => r.High).ToList();
-                var lowPrices = historical.Select(r => r.Low).ToList();
-                var closePrices = historical.Select(r => r.Close).ToList();
-
-                if (closePrices.Count < period + 1)
-                {
-                    _logger.LogWarning($"Not enough data for ATR {period} on {symbol}. Found {closePrices.Count} periods.");
-                    return null;
-                }
-
-                decimal sumTr = 0;
-                for (int i = 1; i <= period; i++)
-                {
-                    decimal tr = Math.Max(highPrices[i] - lowPrices[i],
-                        Math.Max(Math.Abs(highPrices[i] - closePrices[i - 1]), Math.Abs(lowPrices[i] - closePrices[i - 1])));
-                    sumTr += tr;
-                }
-                return sumTr / period;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error calculating ATR for {symbol}: {ex.Message}");
-                return null;
-            }
-        }
-
-        public async Task<Ohlc?> GetTodaysOhlcAsync(string symbol, string interval = "1d")
-        {
-            try
-            {
-                var range = interval == "1d" ? "7d" : "1d";
-                var historical = await FetchHistoricalDataAsync(symbol, range, interval);
-                var lastRow = historical.OrderByDescending(r => r.Timestamp).FirstOrDefault();
-                if (lastRow == null)
-                {
-                    _logger.LogWarning($"No OHLC data for {symbol} with interval {interval}.");
-                    return null;
-                }
-
-                return lastRow;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error fetching OHLC for {symbol} with interval {interval}: {ex.Message}");
-                return null;
-            }
-        }
-
-        public async Task<decimal?> GetVolumeSmaAsync(string symbol, int period = 20, string interval = "1d")
-        {
-            try
-            {
-                var range = interval == "1d" ? "1mo" : "7d";
-                var historical = await FetchHistoricalDataAsync(symbol, range, interval);
-                var volumes = historical.Select(r => r.Volume).ToList();
-                if (volumes.Count < period)
-                {
-                    _logger.LogWarning($"Not enough data for Volume SMA {period} on {symbol}. Found {volumes.Count} periods.");
-                    return null;
-                }
-                return (decimal)volumes.TakeLast(period).Average();
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error calculating Volume SMA for {symbol}: {ex.Message}");
-                return null;
-            }
-        }
-
-        public async Task<decimal?> GetRsiAsync(string symbol, int period = 14, string interval = "1d")
-        {
-            try
-            {
-                var range = interval == "1d" ? "1mo" : "7d";
-                var historical = await FetchHistoricalDataAsync(symbol, range, interval);
-                var closePrices = historical.Select(r => r.Close).ToList();
-                if (closePrices.Count < period + 1)
-                {
-                    _logger.LogWarning($"Not enough data for RSI {period} on {symbol}. Found {closePrices.Count} periods.");
-                    return null;
-                }
-
-                decimal gains = 0, losses = 0;
-                for (int i = closePrices.Count - period - 1; i < closePrices.Count - 1; i++)
-                {
-                    decimal change = closePrices[i + 1] - closePrices[i];
-                    if (change > 0) gains += change;
-                    else losses -= change;
-                }
-                decimal avgGain = gains / period;
-                decimal avgLoss = losses / period;
-                decimal rs = avgGain / (avgLoss == 0 ? 1 : avgLoss);
-                return 100 - (100 / (1 + rs));
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error calculating RSI for {symbol}: {ex.Message}");
-                return null;
-            }
-        }
-
-        public async Task<bool> IsUpTrendAsync(string symbol)
-        {
-            try
-            {
-                var ema50 = await GetEma50Async(symbol);
-                var quote = await GetTodaysOhlcAsync(symbol);
-                if (!ema50.HasValue || quote == null)
-                {
-                    _logger.LogWarning($"Cannot determine uptrend for {symbol}. EMA50: {ema50}, OHLC: {quote}");
-                    return false;
-                }
-                return quote.Close > ema50.Value;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error checking uptrend for {symbol}: {ex.Message}");
-                return false;
-            }
-        }
-
-        public async Task<bool> IsBreakoutAsync(string symbol)
-        {
-            try
-            {
-                var historical = await FetchHistoricalDataAsync(symbol, "1mo", "1d");
-                var closePrices = historical.Select(r => r.Close).ToList();
-                var volumes = historical.Select(r => r.Volume).ToList();
-
-                if (closePrices.Count < 20)
-                {
-                    _logger.LogWarning($"Not enough data for breakout on {symbol}. Found {closePrices.Count} periods.");
-                    return false;
-                }
-
-                decimal sma20 = closePrices.TakeLast(20).Average();
-                decimal sumSquaredDiff = closePrices.TakeLast(20).Sum(p => (p - sma20) * (p - sma20));
-                decimal stdDev = (decimal)Math.Sqrt((double)(sumSquaredDiff / 20));
-                decimal upperBand = sma20 + (2 * stdDev);
-
-                decimal? rsi = await GetRsiAsync(symbol);
-                decimal? volumeSma = await GetVolumeSmaAsync(symbol, 20);
-
-                if (!rsi.HasValue || !volumeSma.HasValue)
-                {
-                    _logger.LogWarning($"Cannot calculate breakout for {symbol}. RSI: {rsi}, VolumeSMA: {volumeSma}");
-                    return false;
-                }
-
-                return closePrices.Last() > upperBand && rsi > 50 && volumes.Last() > volumeSma;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error checking breakout for {symbol}: {ex.Message}");
-                return false;
-            }
-        }
-
-        public async Task<bool> IsScalpingBreakoutAsync(string symbol)
-        {
-            try
-            {
-                var historical = await FetchHistoricalDataAsync(symbol, "7d", "5m");
-                var closePrices = historical.Select(r => r.Close).ToList();
-                var volumes = historical.Select(r => r.Volume).ToList();
-
-                if (closePrices.Count < 20)
-                {
-                    _logger.LogWarning($"Not enough data for scalping breakout on {symbol}. Found {closePrices.Count} periods.");
-                    return false;
-                }
-
-                decimal sma20 = closePrices.TakeLast(20).Average();
-                decimal sumSquaredDiff = closePrices.TakeLast(20).Sum(p => (p - sma20) * (p - sma20));
-                decimal stdDev = (decimal)Math.Sqrt((double)(sumSquaredDiff / 20));
-                decimal upperBand = sma20 + (2 * stdDev);
-
-                decimal? rsi = await GetRsiAsync(symbol, 14, "5m");
-                decimal? volumeSma = await GetVolumeSmaAsync(symbol, 20, "5m");
-
-                if (!rsi.HasValue || !volumeSma.HasValue)
-                {
-                    _logger.LogWarning($"Cannot calculate scalping breakout for {symbol}. RSI: {rsi}, VolumeSMA: {volumeSma}");
-                    return false;
-                }
-
-                return closePrices.Last() > upperBand && rsi > 60 && volumes.Last() > volumeSma;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError($"Error checking scalping breakout for {symbol}: {ex.Message}");
-                return false;
-            }
-        }
-
+                    _logger.LogWarning("Retry {RetryCount} after {TimeSpan} due to {ExceptionMessage}",
+                        retryCount, timeSpan, exception.Message);
+                });
     }
+
+    public async Task<bool> IsPriceAboveEmaAsync(string symbol, int period, DateTime? date = null)
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var quote = await GetQuoteAsync(symbol, date.Value);
+            var ema = await GetEmaAsync(symbol, period, "1d", date);
+            if (quote == null || quote.LastPrice <= 0 || !ema.HasValue || ema.Value <= 0)
+            {
+                _logger.LogWarning("Invalid quote or EMA for {Symbol} on {Date}", symbol, date.Value);
+                return false;
+            }
+            bool isAbove = quote.LastPrice > ema.Value;
+            _logger.LogInformation("{Symbol} price {Price:F2} {IsAbove} EMA{Period} {Ema:F2} on {Date}",
+                symbol, quote.LastPrice, isAbove ? ">" : "<=", period, ema.Value, date.Value);
+            return isAbove;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error checking price above EMA{Period} for {Symbol}: {Message}", period, symbol, ex.Message);
+            return false;
+        }
+    }
+
+    public async Task<bool> IsBreakoutAsync(string symbol, DateTime? date = null)
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var historicalData = await FetchHistoricalDataAsync(symbol, date.Value, "1d", 20);
+            if (historicalData.Count < 20)
+            {
+                _logger.LogWarning("Insufficient data for breakout check for {Symbol} on {Date}", symbol, date.Value);
+                return false;
+            }
+            var upperBand = CalculateBollingerBands(historicalData.Select(d => d.Close).ToList(), 20, 2).Upper;
+            var latestPrice = historicalData.Last().Close;
+            bool isBreakout = latestPrice > upperBand;
+            _logger.LogInformation("{Symbol} price {Price:F2} {IsBreakout} Bollinger Upper Band {Upper:F2} on {Date}",
+                symbol, latestPrice, isBreakout ? ">" : "<=", upperBand, date.Value);
+            return isBreakout;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error checking breakout for {Symbol}: {Message}", symbol, ex.Message);
+            return false;
+        }
+    }
+
+    public async Task<decimal?> GetRsiAsync(string symbol, DateTime? date = null)
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var historicalData = await FetchHistoricalDataAsync(symbol, date.Value, "1d", 15);
+            if (historicalData.Count < 14)
+            {
+                _logger.LogWarning("Insufficient data for RSI calculation for {Symbol} on {Date}", symbol, date.Value);
+                return null;
+            }
+            var rsi = CalculateRsi(historicalData.Select(d => d.Close).ToList(), 14);
+            _logger.LogInformation("RSI for {Symbol} on {Date}: {Rsi:F2}", symbol, date.Value, rsi);
+            return rsi;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error calculating RSI for {Symbol}: {Message}", symbol, ex.Message);
+            return null;
+        }
+    }
+
+    public async Task<bool> IsVolumeAboveSmaAsync(string symbol, int period, DateTime? date = null)
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var historicalData = await FetchHistoricalDataAsync(symbol, date.Value, "1d", period + 1);
+            if (historicalData.Count < period)
+            {
+                _logger.LogWarning("Insufficient data for volume SMA check for {Symbol} on {Date}", symbol, date.Value);
+                return false;
+            }
+            var latestVolume = historicalData.Last().Volume;
+            var sma = historicalData.TakeLast(period).Average(d => d.Volume);
+            bool isAbove = latestVolume > sma;
+            _logger.LogInformation("{Symbol} volume {Volume} {IsAbove} SMA{Period} {Sma:F2} on {Date}",
+                symbol, latestVolume, isAbove ? ">" : "<=", period, sma, date.Value);
+            return isAbove;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error checking volume above SMA for {Symbol}: {Message}", symbol, ex.Message);
+            return false;
+        }
+    }
+
+    public async Task<bool> IsVolumeBelowSmaAsync(string symbol, int period, DateTime? date = null)
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var historicalData = await FetchHistoricalDataAsync(symbol, date.Value, "1d", period);
+            if (historicalData.Count < period)
+            {
+                _logger.LogWarning("Insufficient data for volume SMA check for {Symbol} on {Date}", symbol, date.Value);
+                return false;
+            }
+            var latestVolume = historicalData.Last().Volume;
+            var sma = historicalData.TakeLast(period).Average(d => d.Volume);
+            bool isBelow = latestVolume < sma;
+            _logger.LogInformation("{Symbol} volume {Volume} {IsBelow} SMA{Period} {Sma:F2} on {Date}",
+                symbol, latestVolume, isBelow ? "<" : ">=", period, sma, date.Value);
+            return isBelow;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error checking volume below SMA for {Symbol}: {Message}", symbol, ex.Message);
+            return false;
+        }
+    }
+
+    public async Task<decimal?> GetAtrAsync(string symbol, int period, string interval = "1d", DateTime? date = null)
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var historicalData = await FetchHistoricalDataAsync(symbol, date.Value, interval, period + 1);
+            if (historicalData.Count < period + 1)
+            {
+                _logger.LogWarning("Insufficient data for ATR calculation for {Symbol} on {Date}", symbol, date.Value);
+                return null;
+            }
+            var atr = CalculateAtr(historicalData, period);
+            _logger.LogInformation("ATR{Period} for {Symbol} on {Date} (interval: {Interval}): {Atr:F2}",
+                period, symbol, date.Value, interval, atr);
+            return atr;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error calculating ATR for {Symbol}: {Message}", symbol, ex.Message);
+            return null;
+        }
+    }
+
+    public async Task<decimal?> GetEmaAsync(string symbol, int period, string interval = "1d", DateTime? date = null)
+    {
+        try
+        {
+            var range = interval == "1d" ? "3mo" : "7d"; //3mo
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            date ??= now;
+            var historicalData = await FetchHistoricalDataAsync(symbol, date.Value, interval, period * 2);
+            if (historicalData.Count < period)
+            {
+                _logger.LogWarning("Insufficient data for EMA{Period} calculation for {Symbol} on {Date}", period, symbol, date.Value);
+                return null;
+            }
+            var ema = CalculateEma(historicalData.Select(d => d.Close).ToList(), period);
+            _logger.LogInformation("EMA{Period} for {Symbol} on {Date} (interval: {Interval}): {Ema:F2}",
+                period, symbol, date.Value, interval, ema);
+            return ema;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error calculating EMA{Period} for {Symbol}: {Message}", period, symbol, ex.Message);
+            return null;
+        }
+    }
+
+    public async Task<Ohlc> GetTodaysOhlcAsync(string symbol, string interval = "1d")
+    {
+        try
+        {
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, _istTimeZone);
+            var historicalData = await FetchHistoricalDataAsync(symbol, now, interval, 1);
+            if (historicalData.Count == 0)
+            {
+                _logger.LogWarning("No OHLC data for {Symbol} on {Date}", symbol, now);
+                return new Ohlc();
+            }
+            var data = historicalData.Last();
+            var ohlc = new Ohlc
+            {
+                Open = data.Open,
+                High = data.High,
+                Low = data.Low,
+                Close = data.Close,
+                Volume = data.Volume,
+                Timestamp = data.Timestamp
+            };
+            _logger.LogInformation("OHLC for {Symbol} on {Date}: O={Open:F2}, H={High:F2}, L={Low:F2}, C={Close:F2}",
+                symbol, now, ohlc.Open, ohlc.High, ohlc.Low, ohlc.Close);
+            return ohlc;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error fetching OHLC for {Symbol}: {Message}", symbol, ex.Message);
+            return new Ohlc();
+        }
+    }
+
+    public async Task<Quote> GetQuoteAsync(string symbol, DateTime date)
+    {
+        try
+        {
+            var historicalData = await FetchHistoricalDataAsync(symbol, date, "1d", 1);
+            if (historicalData.Count == 0)
+            {
+                _logger.LogWarning("No quote data for {Symbol} on {Date}", symbol, date);
+                return new Quote();
+            }
+            var data = historicalData.Last();
+            var quote = new Quote
+            {
+                LastPrice = data.Close,
+                Open = data.Open,
+                Close = data.Close,
+                Volume = data.Volume,
+                High = data.High,
+                Low = data.Low,
+                PrevClose = historicalData.Count > 1 ? historicalData[historicalData.Count - 2].Close : data.Close
+            };
+            _logger.LogInformation("Quote for {Symbol} on {Date}: LastPrice={LastPrice:F2}", symbol, date, quote.LastPrice);
+            return quote;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error fetching quote for {Symbol}: {Message}", symbol, ex.Message);
+            return new Quote();
+        }
+    }
+
+    private async Task<List<Ohlc>> FetchHistoricalDataAsync(string symbol, DateTime date, string interval, int period)
+    {
+        try
+        {
+            var endTime = (long)(TimeZoneInfo.ConvertTimeToUtc(date, _istTimeZone) - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+            var startTime = (long)(TimeZoneInfo.ConvertTimeToUtc(date.AddDays(-period * (interval == "5m" ? 1 : 2)), _istTimeZone) - new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc)).TotalSeconds;
+            var url = $"{symbol}.NS?range={period}d&interval={interval}&includePrePost=false&events=history";
+
+            // var response = await _retryPolicy.ExecuteAsync(async () =>
+            // {
+            //     var request = new HttpRequestMessage(HttpMethod.Get, url);
+            //     var result = await _httpClient.SendAsync(request);
+            //     return result;
+            // });
+            //response.EnsureSuccessStatusCode();
+
+            var response = await _httpClient.GetAsync(url);
+            response.EnsureSuccessStatusCode();
+
+
+            var content = await response.Content.ReadAsStringAsync();
+            var jsonDoc = JsonDocument.Parse(content);
+            var result = jsonDoc.RootElement.GetProperty("chart").GetProperty("result")[0];
+            var timestamps = result.GetProperty("timestamp").EnumerateArray().Select(t => t.GetInt64()).ToList();
+            var indicators = result.GetProperty("indicators").GetProperty("quote")[0];
+            
+            var opens = indicators.GetProperty("open").EnumerateArray().Select(o => o.ValueKind == JsonValueKind.Null ? 0m : o.GetDecimal()).ToList();
+            var highs = indicators.GetProperty("high").EnumerateArray().Select(h => h.ValueKind == JsonValueKind.Null ? 0m : h.GetDecimal()).ToList();
+            var lows = indicators.GetProperty("low").EnumerateArray().Select(l => l.ValueKind == JsonValueKind.Null ? 0m : l.GetDecimal()).ToList();
+            var closes = indicators.GetProperty("close").EnumerateArray().Select(c => c.ValueKind == JsonValueKind.Null ? 0m : c.GetDecimal()).ToList();
+            var volumes = indicators.GetProperty("volume").EnumerateArray().Select(v => v.ValueKind == JsonValueKind.Null ? 0L : v.GetInt64()).ToList();
+
+
+            var historicalData = new List<Ohlc>();
+            for (int i = 0; i < timestamps.Count; i++)
+            {
+                historicalData.Add(new Ohlc
+                {
+                    Timestamp = DateTimeOffset.FromUnixTimeSeconds(timestamps[i]).DateTime,
+                    Open = opens[i],
+                    High = highs[i],
+                    Low = lows[i],
+                    Close = closes[i],
+                    Volume = volumes[i]
+                });
+            }
+            return historicalData.OrderBy(d => d.Timestamp).ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError("Error fetching historical data for {Symbol}: {Message}", symbol, ex.Message);
+            return new List<Ohlc>();
+        }
+    }
+
+    private decimal CalculateEma(List<decimal> prices, int period)
+    {
+        if (prices.Count < period) return 0;
+        decimal k = 2m / (period + 1);
+        decimal ema = prices.Take(period).Average();
+        for (int i = period; i < prices.Count; i++)
+        {
+            ema = (prices[i] * k) + (ema * (1 - k));
+        }
+        return ema;
+    }
+
+    private decimal CalculateRsi(List<decimal> prices, int period)
+    {
+        if (prices.Count < period) return 0;
+        var gains = new List<decimal>();
+        var losses = new List<decimal>();
+        for (int i = 1; i < prices.Count; i++)
+        {
+            var change = prices[i] - prices[i - 1];
+            if (change > 0)
+                gains.Add(change);
+            else
+                losses.Add(-change);
+        }
+        var avgGain = gains.TakeLast(period).Average();
+        var avgLoss = losses.TakeLast(period).Average();
+        if (avgLoss == 0) return 100;
+        var rs = avgGain / avgLoss;
+        return 100 - (100 / (1 + rs));
+    }
+
+    private decimal CalculateAtr(List<Ohlc> data, int period)
+    {
+        if (data.Count < period + 1) return 0;
+        var trList = new List<decimal>();
+        for (int i = 1; i < data.Count; i++)
+        {
+            var high = data[i].High;
+            var low = data[i].Low;
+            var prevClose = data[i - 1].Close;
+            var tr1 = high - low;
+            var tr2 = Math.Abs(high - prevClose);
+            var tr3 = Math.Abs(low - prevClose);
+            var trueRange = Math.Max(tr1, Math.Max(tr2, tr3));
+            trList.Add(trueRange);
+        }
+        return trList.TakeLast(period).Average();
+    }
+
+    private (decimal Upper, decimal Lower) CalculateBollingerBands(List<decimal> prices, int period, decimal multiplier)
+    {
+        if (prices.Count < period) return (0, 0);
+        var sma = prices.TakeLast(period).Average();
+        var variance = prices.TakeLast(period).Sum(p => (p - sma) * (p - sma)) / period;
+        var stdDev = (decimal)Math.Sqrt((double)variance);
+        return (sma + multiplier * stdDev, sma - multiplier * stdDev);
+    }
+
 }
