@@ -34,6 +34,15 @@ public class BuyJob : IJob
         {
             _logger.LogInformation("Executing Swing Buy Job at {Time}", DateTime.Now);
 
+
+            var status = _stoxKartClient.AuthenticateAsync();
+            if (!status)
+            {
+                _logger.LogError("Authentication failed. Aborting swing buy.");
+                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
+                return;
+            }
+
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
@@ -54,14 +63,6 @@ public class BuyJob : IJob
             }
 
             _logger.LogInformation("Executing Buy Job at {Time} IST", now);
-
-            var status = _stoxKartClient.AuthenticateAsync();
-            if (!status)
-            {
-                _logger.LogError("Authentication failed. Aborting swing buy.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                return;
-            }
             Console.WriteLine("Buy Jobs");
             var availableFunds = await _stoxKartClient.GetFundsAsync();
             if (availableFunds <= 20000)

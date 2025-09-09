@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Quartz;
+using Quartz.Impl;
 using TradoXBot.Jobs;
 using TradoXBot.Services;
 
@@ -24,6 +25,15 @@ namespace TradoXBot
             var builder = Host.CreateDefaultBuilder(args)
                 .ConfigureServices((hostContext, services) =>
                 {
+                    var configuration = hostContext.Configuration;
+
+                    services.AddSingleton<IConfiguration>(configuration);
+                    services.AddLogging(builder =>
+                    {
+                        builder.AddConsole();
+                        builder.AddConfiguration(configuration.GetSection("Logging"));
+                    });
+
                     // Register services
                     services.AddSingleton<IConfiguration>(configuration);
                     services.AddSingleton<StoxKartClient>();
@@ -32,6 +42,7 @@ namespace TradoXBot
                     services.AddSingleton<MongoDbService>();
                     services.AddSingleton<BacktestService>();
                     services.AddSingleton<TradingOperations>();
+                    services.AddSingleton<ISchedulerFactory, StdSchedulerFactory>();
 
                     // Configure Quartz scheduler
                     services.AddQuartz(q =>
@@ -98,7 +109,7 @@ namespace TradoXBot
                         // After first hour: hourly
                         q.AddTrigger(opts => opts
                             .ForJob(sellJobKey)
-                            .WithIdentity("SellTriggerHourly")
+                            .WithIdentity("SellTriggerHourly", "Trading")
                             .WithDailyTimeIntervalSchedule(s => s
                                 .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(11, 15))
                                 .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 15))
@@ -106,10 +117,9 @@ namespace TradoXBot
                                         DayOfWeek.Thursday, DayOfWeek.Friday)
                                 .WithIntervalInHours(1)));
 
-                        q.AddJob<SellJob>(opts => opts.WithIdentity(sellJobKey));
                         q.AddTrigger(opts => opts
                             .ForJob(sellJobKey)
-                            .WithIdentity("SellTrigger", "Trading")
+                            .WithIdentity("SellTrigger24Hours", "Trading")
                             .WithDailyTimeIntervalSchedule(s =>
                                 s.WithIntervalInHours(24)
                                  .OnEveryDay()
@@ -153,9 +163,9 @@ namespace TradoXBot
             }
             else
             {
-                //await host.RunAsync();
-                var tradingOperations = host.Services.GetRequiredService<TradingOperations>();
-                await tradingOperations.ShowMenuAsync();
+                await host.RunAsync();
+                //var tradingOperations = host.Services.GetRequiredService<TradingOperations>();
+                //await tradingOperations.ShowMenuAsync();
             }
         }
     }

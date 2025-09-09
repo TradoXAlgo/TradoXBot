@@ -44,7 +44,7 @@ public class ScalpingBuyJob : IJob
             if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
             {
                 _logger.LogInformation("Scalping Monitor skipped: Outside market hours (9:15 AM - 2:30 PM IST) or not a trading day.");
-                //return;
+                return;
             }
 
             if (IsMonthEnd(now))
