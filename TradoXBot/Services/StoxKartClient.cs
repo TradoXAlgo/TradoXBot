@@ -52,7 +52,7 @@ public class StoxKartClient
             });
     }
 
-    public bool AuthenticateAsync()
+    public async Task<bool> AuthenticateAsync()
     {
         CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
         if (!string.IsNullOrEmpty(_accessToken))
@@ -62,12 +62,15 @@ public class StoxKartClient
         }
         try
         {
-            bool status = _superrApi.LoginAndSetAccessToken();
-            if (status)
+            var task = Task.Run(() => _superrApi.LoginAndSetAccessToken());
+            string status = await task;
+            if (status == string.Empty)
             {
-                return status;
+                return false;
             }
             _accessToken = _superrApi.GetAccessToken()?.ToString();
+
+            Console.WriteLine("access Token ::" + _accessToken);
             if (string.IsNullOrEmpty(_accessToken))
             {
                 _logger.LogError("No access token received in login response.");
@@ -76,7 +79,7 @@ public class StoxKartClient
             _httpClient.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _accessToken);
             _httpClient.DefaultRequestHeaders.Add("X-API-Key", _apiKey);
             _logger.LogInformation("Successfully authenticated with StoxKart API.");
-            return status;
+            return true;
         }
         catch (Exception ex)
         {
@@ -111,9 +114,10 @@ public class StoxKartClient
         return fundDerails["data"].Count > 0 ? Convert.ToDecimal(fundDerails["data"]["available_limit"]) : 0;
     }
 
-    public string PlaceOrderAsync(string action, string exchange, string token, string orderType, string productType, int quantity, decimal price)
+    public async Task<string> PlaceOrderAsync(string action, string exchange, string token, string orderType, string productType, int quantity, decimal price)
     {
-        AuthenticateAsync();
+        var status = await AuthenticateAsync();
+        if (!status) return string.Empty;
 
         if (string.IsNullOrEmpty(_accessToken))
         {
@@ -150,12 +154,13 @@ public class StoxKartClient
         return PlaceOrderRes["data"]["order_id"];
     }
 
-    public Dictionary<string, Quote> GetQuotesAsync(string exchange, List<string> tokens)
+    public async Task<Dictionary<string, Quote>> GetQuotesAsync(string exchange, List<string> tokens)
     {
         try
         {
             if (string.IsNullOrEmpty(_accessToken)) throw new Exception("Authenticate first.");
-            AuthenticateAsync();
+            var status = await AuthenticateAsync();
+            if (!status) return [];
 
             if (tokens == null || tokens.Count == 0)
             {
@@ -255,13 +260,17 @@ public class StoxKartClient
         }
     }
 
-    public List<PortfolioHolding> GetPortfolioHoldingsAsync()
+    public async Task<List<PortfolioHolding>> GetPortfolioHoldingsAsync()
     {
         //var tokens = new Dictionary<string, string>();
+        var status = await AuthenticateAsync();
+        if (!status) return [];
         var portfolioHoldings = new List<PortfolioHolding>();
-        AuthenticateAsync();
+        Console.WriteLine(_accessToken);
 
-        Dictionary<string, dynamic> holdingDetailsResponse = _superrApi.HoldingDetails();
+        // do some stuff
+        var task = Task.Run(() => _superrApi.HoldingDetails());
+        Dictionary<string, dynamic> holdingDetailsResponse = await task;
 
         if (holdingDetailsResponse["status"] == "success")
         {
@@ -293,11 +302,12 @@ public class StoxKartClient
         return portfolioHoldings;
     }
 
-    public List<PortfolioHolding> GetPositionAsync()
+    public async Task<List<PortfolioHolding>> GetPositionAsync()
     {
         //var tokens = new Dictionary<string, string>();
         var portfolioHoldings = new List<PortfolioHolding>();
-        AuthenticateAsync();
+        var status = await AuthenticateAsync();
+        if (!status) return [];
 
         Dictionary<string, dynamic> holdingDetailsResponse = _superrApi.PositionDetails();
 

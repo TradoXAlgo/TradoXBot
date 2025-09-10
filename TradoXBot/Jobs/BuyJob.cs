@@ -35,7 +35,7 @@ public class BuyJob : IJob
             _logger.LogInformation("Executing Swing Buy Job at {Time}", DateTime.Now);
 
 
-            var status = _stoxKartClient.AuthenticateAsync();
+            var status = await _stoxKartClient.AuthenticateAsync();
             if (!status)
             {
                 _logger.LogError("Authentication failed. Aborting swing buy.");
@@ -131,7 +131,7 @@ public class BuyJob : IJob
                     continue;
                 }
 
-                var quotes = _stoxKartClient.GetQuotesAsync("NSE", new[] { token }.ToList());
+                var quotes = await _stoxKartClient.GetQuotesAsync("NSE", new[] { token }.ToList());
                 if (!quotes.TryGetValue(token, out var quote))
                 {
                     _logger.LogWarning("No quote data for {Symbol}. Skipping.", stock.Symbol);
@@ -162,7 +162,7 @@ public class BuyJob : IJob
                 }
 
                 // Place buy order
-                var orderId = _stoxKartClient.PlaceOrderAsync(
+                var orderId = await _stoxKartClient.PlaceOrderAsync(
                     "BUY",
                     "NSE",
                     token,

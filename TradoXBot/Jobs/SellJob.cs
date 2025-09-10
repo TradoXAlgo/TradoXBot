@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Telegram.Bot;
 using TradoXBot.Services;
 using TradoXBot.Models;
+using System.Diagnostics.Eventing.Reader;
 
 namespace TradoXBot.Jobs;
 
@@ -40,7 +41,7 @@ public class SellJob : IJob
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
-            var marketClose = new TimeSpan(15, 30, 0);
+            var marketClose = new TimeSpan(15, 20, 0);
             if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
             {
                 _logger.LogInformation("Sell Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
@@ -48,13 +49,15 @@ public class SellJob : IJob
             }
 
             _logger.LogInformation("Executing Swing Sell Job at {Time}", DateTime.Now);
-            _stoxKartClient.AuthenticateAsync();
+            var status = await _stoxKartClient.AuthenticateAsync();
+            if (!status) return;
 
             var openTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
             var tokens = await _stoxKartClient.GetInstrumentTokensAsync("NSE");
+            var holdins = await _stoxKartClient.GetPortfolioHoldingsAsync();
+
             var scannerStocks = await _chartinkScraper.GetStocksAsync();
             var scannerSymbols = scannerStocks.Select(s => s.Symbol.ToUpper()).ToList();
-            var holdins = _stoxKartClient.GetPortfolioHoldingsAsync();
             var holdingsSymbols = holdins.Select(h => h.Symbol.ToUpper()).ToHashSet();
 
             var quoteRequests = openTransactions
@@ -63,7 +66,7 @@ public class SellJob : IJob
                 .Distinct()
                 .ToList();
 
-            var quotes = _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+            var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new Dictionary<string, Quote>();
             foreach (var kv in quotes)
@@ -77,6 +80,11 @@ public class SellJob : IJob
             var yesterday = now.Date.AddDays(-1);
             var transactionsBoughtYesterday = openTransactions
                 .Where(t => t.BuyDate.Date == yesterday)
+                .ToList();
+
+            var after2Day = now.Date.AddDays(-2);
+            var transactionsBoughtAfter2Day = openTransactions
+                .Where(t => t.BuyDate.Date == after2Day)
                 .ToList();
 
             foreach (var transaction in openTransactions)
@@ -126,6 +134,11 @@ public class SellJob : IJob
                     sell = true;
                     sellReason = ">2% profit since yesterday";
                 }
+                else if (transactionsBoughtYesterday.Any(t => t.Symbol == transaction.Symbol) && profitPercent >= 5)
+                {
+                    sell = true;
+                    sellReason = ">5% profit since yesterday";
+                }
                 else if (transaction.ExpiryDate <= now)
                 {
                     sell = true;
@@ -136,10 +149,10 @@ public class SellJob : IJob
                     sell = true;
                     sellReason = ">10% profit";
                 }
-                else if (quote.LastPrice < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 21))
+                else if (quote.LastPrice < await _historicalFetcher.GetEmaAsync(transaction.Symbol, 9) && now.TimeOfDay >= marketClose)
                 {
                     sell = true;
-                    sellReason = "Price below EMA21";
+                    sellReason = "Price below EMA9";
                 }
                 else if (quote.LastPrice <= trailingStopLoss && isEma5Confirmed)
                 {

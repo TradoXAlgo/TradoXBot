@@ -118,28 +118,27 @@ public class SuperrApi
             return "failure:" + parsedResponse["message"];
     }
 
-    public bool LoginAndSetAccessToken()
+    public string LoginAndSetAccessToken()
     {
         string request_token = LoginWithAPIKey(GetLoginWithAPIKeyUrl());
         if (request_token.Split(":")[0] == "failure")
         {
             Console.WriteLine(request_token.Split(":")[1]);
-            return false;
+            return string.Empty;
         }
         string auth_token = Verify2FA(Get2FA_VerifyUrl(), request_token);
         if (request_token.Split(":")[0] == "failure")
         {
             Console.WriteLine(request_token.Split(":")[1]);
-            return false;
+            return string.Empty;
         }
         _accessToken = GetAccessToken(GetAccessTokenUrl(), auth_token);
         if (request_token.Split(":")[0] == "failure")
         {
             Console.WriteLine(request_token.Split(":")[1]);
-            return false;
+            return string.Empty;
         }
-        Console.WriteLine("access Token ::" + _accessToken);
-        return true;
+        return _accessToken;
     }
 
     public Dictionary<string, dynamic> PlaceOrder(

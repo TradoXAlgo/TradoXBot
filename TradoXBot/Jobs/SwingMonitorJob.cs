@@ -48,7 +48,7 @@ public class SwingMonitorJob : IJob
 
             _logger.LogInformation("Executing Swing Monitor Job at {Time} IST", now);
 
-            var status = _stoxKartClient.AuthenticateAsync();
+            var status = await _stoxKartClient.AuthenticateAsync();
             if (!status)
             {
                 _logger.LogError("Authentication failed. Aborting swing buy.");
@@ -69,7 +69,7 @@ public class SwingMonitorJob : IJob
                 .Where(t => t != null)
                 .Distinct()
                 .ToList();
-            var quotes = _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+            var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new Dictionary<string, Quote>();
             foreach (var kv in quotes)

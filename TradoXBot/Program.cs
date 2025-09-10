@@ -14,6 +14,7 @@ namespace TradoXBot
         [Obsolete]
         static async Task Main(string[] args)
         {
+
             // Build configuration
             IConfiguration configuration = new ConfigurationBuilder()
                 .SetBasePath(AppDomain.CurrentDomain.BaseDirectory)
@@ -100,19 +101,29 @@ namespace TradoXBot
                             .WithIdentity("SellTriggerQuat")
                             .WithDailyTimeIntervalSchedule(s => s
                                 .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 15))
-                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 30))
+                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 20))
                                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
                                 .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
                                         DayOfWeek.Thursday, DayOfWeek.Friday)
                                 .WithIntervalInMinutes(15)));
 
+                        q.AddTrigger(opts => opts
+                                                    .ForJob(sellJobKey)
+                                                    .WithIdentity("SellTriggerQuat")
+                                                    .WithDailyTimeIntervalSchedule(s => s
+                                                        .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 15))
+                                                        .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 20))
+                                                        .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
+                                                        .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
+                                                                DayOfWeek.Thursday, DayOfWeek.Friday)
+                                                        .WithIntervalInMinutes(1)));
                         // After first hour: hourly
                         q.AddTrigger(opts => opts
                             .ForJob(sellJobKey)
                             .WithIdentity("SellTriggerHourly", "Trading")
                             .WithDailyTimeIntervalSchedule(s => s
-                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(11, 15))
-                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 15))
+                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(10, 15))
+                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 20))
                                 .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
                                         DayOfWeek.Thursday, DayOfWeek.Friday)
                                 .WithIntervalInHours(1)));
@@ -152,6 +163,7 @@ namespace TradoXBot
                         logging.AddConsole();
                         logging.SetMinimumLevel(LogLevel.Information);
                     });
+                    //services.AddHostedService<TradoXBotHostedService>();
                 });
 
             var host = builder.Build();
@@ -163,10 +175,85 @@ namespace TradoXBot
             }
             else
             {
-                await host.RunAsync();
-                //var tradingOperations = host.Services.GetRequiredService<TradingOperations>();
-                //await tradingOperations.ShowMenuAsync();
+                //await host.RunAsync();
+                //Console.WriteLine("Done!");
+                var tradingOperations = host.Services.GetRequiredService<TradingOperations>();
+                await tradingOperations.ShowMenuAsync();
             }
         }
+    }
+}
+
+
+public sealed class TradoXBotHostedService : IHostedService, IHostedLifecycleService
+{
+    private readonly ILogger _logger;
+
+    public TradoXBotHostedService(
+        ILogger<TradoXBotHostedService> logger,
+        IHostApplicationLifetime appLifetime)
+    {
+        _logger = logger;
+
+        appLifetime.ApplicationStarted.Register(OnStarted);
+        appLifetime.ApplicationStopping.Register(OnStopping);
+        appLifetime.ApplicationStopped.Register(OnStopped);
+    }
+
+    Task IHostedLifecycleService.StartingAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("1. StartingAsync has been called.");
+
+        return Task.CompletedTask;
+    }
+
+    Task IHostedService.StartAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("2. StartAsync has been called.");
+
+        return Task.CompletedTask;
+    }
+
+    Task IHostedLifecycleService.StartedAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("3. StartedAsync has been called.");
+
+        return Task.CompletedTask;
+    }
+
+    private void OnStarted()
+    {
+        _logger.LogInformation("4. OnStarted has been called.");
+    }
+
+    private void OnStopping()
+    {
+        _logger.LogInformation("5. OnStopping has been called.");
+    }
+
+    Task IHostedLifecycleService.StoppingAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("6. StoppingAsync has been called.");
+
+        return Task.CompletedTask;
+    }
+
+    Task IHostedService.StopAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("7. StopAsync has been called.");
+
+        return Task.CompletedTask;
+    }
+
+    Task IHostedLifecycleService.StoppedAsync(CancellationToken cancellationToken)
+    {
+        _logger.LogInformation("8. StoppedAsync has been called.");
+
+        return Task.CompletedTask;
+    }
+
+    private void OnStopped()
+    {
+        _logger.LogInformation("9. OnStopped has been called.");
     }
 }

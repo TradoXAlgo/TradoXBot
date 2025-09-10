@@ -49,7 +49,7 @@ public class ScalpingSelJob : IJob
 
             _logger.LogInformation("Executing Swing Sell Job at {Time}", DateTime.Now);
 
-            var status = _stoxKartClient.AuthenticateAsync();
+            var status = await _stoxKartClient.AuthenticateAsync();
             if (!status)
             {
                 _logger.LogError("Authentication failed. Aborting swing buy.");
@@ -61,7 +61,7 @@ public class ScalpingSelJob : IJob
             var scannerStocks = await _chartinkScraper.GetStocksAsync();
             var scannerSymbols = scannerStocks.Select(s => s.Symbol.ToUpper()).ToList();
 
-            var positions = _stoxKartClient.GetPositionAsync();
+            var positions = await _stoxKartClient.GetPositionAsync();
             var positionsSymbols = positions.Select(h => h.Symbol.ToUpper()).ToHashSet();
             if (positions.Count == 0) return;
 
@@ -71,7 +71,7 @@ public class ScalpingSelJob : IJob
                 .Distinct()
                 .ToList();
 
-            var quotes = _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+            var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new Dictionary<string, Quote>();
             foreach (var kv in quotes)

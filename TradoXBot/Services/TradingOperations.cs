@@ -156,7 +156,7 @@ public class TradingOperations
                 .Where(t => t != null)
                 .Distinct()
                 .ToList();
-            var quotes = _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+            var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new Dictionary<string, Quote>();
             foreach (var kv in quotes)
