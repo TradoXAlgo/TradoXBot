@@ -9,8 +9,7 @@ public class SuperrApi
     private string _root = "https://openapi.stoxkart.com";
     private string _accessToken;
 
-    static User _user;
-    static Ticker _ticker;
+    static User? _user;
 
     public string GetAccessToken()
     {

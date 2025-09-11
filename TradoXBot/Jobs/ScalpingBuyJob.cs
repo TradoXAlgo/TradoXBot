@@ -37,15 +37,13 @@ public class ScalpingBuyJob : IJob
     {
         try
         {
+            var status = await _stoxKartClient.AccessTokenKey();
+            await _telegramBot.SendMessage(_chatId, status);
+            if (status == null) return;
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
-            var marketOpen = new TimeSpan(9, 15, 0);
+            var marketOpen = new TimeSpan(9, 10, 0);
             var marketClose = new TimeSpan(14, 30, 0);
-            if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
-            {
-                _logger.LogInformation("Scalping Monitor skipped: Outside market hours (9:15 AM - 2:30 PM IST) or not a trading day.");
-                return;
-            }
 
             if (IsMonthEnd(now))
             {
@@ -57,15 +55,8 @@ public class ScalpingBuyJob : IJob
 
             _logger.LogInformation("Executing Scalping Monitor Job at {Time} IST", now);
 
-            var status = await _stoxKartClient.AuthenticateAsync();
-            if (!status)
-            {
-                _logger.LogError("Authentication failed. Aborting swing buy.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                return;
-            }
             Console.WriteLine("Scalping Buy Jobs");
-            var availableFunds = 100000; //await _stoxKartClient.GetFundsAsync();
+            var availableFunds = await _stoxKartClient.GetFundsAsync();
             var dailyStockCount = await _mongoDbService.GetDailyUniqueStocksBoughtAsync();
             if (dailyStockCount >= 5)
             {
@@ -75,7 +66,7 @@ public class ScalpingBuyJob : IJob
                 return;
             }
 
-            if (availableFunds <= 20000)
+            if (availableFunds <= 10000)
             {
                 _logger.LogWarning("Insufficient funds for scalping buy (≤ ₹20,000). Checking sell conditions.");
                 await _telegramBot.SendMessage(_chatId, "Scalping Monitor: Insufficient funds (≤ ₹20,000).");
@@ -85,7 +76,7 @@ public class ScalpingBuyJob : IJob
 
             //var maxOrders = Math.Min(GetMaxOrders(availableFunds), 5 - dailyStockCount);
 
-            var maxOrders = Math.Min((int)(availableFunds / 20000), 5 - dailyStockCount);
+            var maxOrders = Math.Min((int)(availableFunds / 10000), 5 - dailyStockCount);
             if (maxOrders < 1)
             {
                 _logger.LogWarning("No orders possible with available funds and daily limit.");
@@ -94,7 +85,7 @@ public class ScalpingBuyJob : IJob
                 return;
             }
 
-            var scannerStocks = await _chartinkScraper.GetStocksAsync();
+            var scannerStocks = await _chartinkScraper.GetScalpingStocksAsync();
             if (scannerStocks.Count == 0)
             {
                 _logger.LogWarning("No stocks found in Chartink scanner.");

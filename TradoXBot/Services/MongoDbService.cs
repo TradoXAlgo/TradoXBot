@@ -12,6 +12,7 @@ namespace TradoXBot.Services
     {
         private readonly IMongoCollection<Transaction> _swingTransactions;
         private readonly IMongoCollection<Transaction> _scalpingTransactions;
+        private readonly IMongoCollection<AuthToken> _authToken;
         private readonly IMongoCollection<ScannerStock> _scannerStocks;
         private readonly ILogger<MongoDbService> _logger;
 
@@ -23,6 +24,7 @@ namespace TradoXBot.Services
             _swingTransactions = database.GetCollection<Transaction>("SwingTransactions");
             _scalpingTransactions = database.GetCollection<Transaction>("ScalpingTransactions");
             _scannerStocks = database.GetCollection<ScannerStock>("ScannerStocks");
+            _authToken = database.GetCollection<AuthToken>("AuthTokens");
 
             // Create indexes for performance
             _swingTransactions.Indexes.CreateOne(new CreateIndexModel<Transaction>(
@@ -88,6 +90,21 @@ namespace TradoXBot.Services
             }
         }
 
+        public async Task InsertAuthTokenAsync(AuthToken authToken)
+        {
+            try
+            {
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                authToken.OnDate = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                authToken.TokenName = "LoginAuthToken";
+                await _authToken.InsertOneAsync(authToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error inserting Auth Token Failed: {Message} ", ex.Message);
+            }
+        }
+
         public async Task UpdateTransactionOnSellAsync(string collectionName, string symbol, DateTime sellDate, decimal? sellPrice, decimal? profitLoss, decimal? profitLossPercentage)
         {
             var collection = collectionName == "SwingTransactions" ? _swingTransactions : _scalpingTransactions;
@@ -105,7 +122,17 @@ namespace TradoXBot.Services
 
             await collection.UpdateOneAsync(filter, update);
         }
+        public async Task UpdateAuthTokenAsync(string? tokenKey)
+        {
+            var filter = Builders<AuthToken>.Filter.And(
+                Builders<AuthToken>.Filter.Eq(t => t.TokenName, "LoginAuthToken")
+            );
 
+            var update = Builders<AuthToken>.Update
+                .Set(t => t.TokenKey, tokenKey);
+
+            await _authToken.UpdateOneAsync(filter, update);
+        }
         public async Task InsertScannerStockAsync(ScannerStock scannerStock)
         {
             scannerStock.Id = Guid.NewGuid().ToString();
@@ -123,6 +150,20 @@ namespace TradoXBot.Services
             {
                 _logger.LogError("Error getting open swing transactions: {Message}", ex.Message);
                 return new List<Transaction>();
+            }
+
+        }
+
+        public async Task<List<AuthToken>> GetAuthTokenAsync()
+        {
+            try
+            {
+                return await _authToken.Find(Builders<AuthToken>.Filter.Eq(static t => t.TokenName, "LoginAuthToken")).ToListAsync();
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError("Error getting open swing transactions: {Message}", ex.Message);
+                return new List<AuthToken>();
             }
 
         }

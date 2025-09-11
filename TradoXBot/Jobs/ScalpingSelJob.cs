@@ -37,25 +37,14 @@ public class ScalpingSelJob : IJob
     {
         try
         {
+            var status = await _stoxKartClient.AccessTokenKey();
+            if (status == null) return;
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
             var marketClose = new TimeSpan(15, 30, 0);
-            if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
-            {
-                _logger.LogInformation("Sell Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
-                return;
-            }
-
             _logger.LogInformation("Executing Swing Sell Job at {Time}", DateTime.Now);
 
-            var status = await _stoxKartClient.AuthenticateAsync();
-            if (!status)
-            {
-                _logger.LogError("Authentication failed. Aborting swing buy.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                return;
-            }
             var openTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
             var tokens = await _stoxKartClient.GetInstrumentTokensAsync("NSE");
             var scannerStocks = await _chartinkScraper.GetStocksAsync();
@@ -101,7 +90,7 @@ public class ScalpingSelJob : IJob
                 string sellReason = "";
                 decimal? atr = await _historicalFetcher.GetAtrAsync(transaction.Symbol, 14, "5m");
                 decimal stopLossPrice = transaction.BuyPrice - (atr.HasValue ? 2 * atr.Value : transaction.BuyPrice * 0.025m);
-                decimal trailingStopLoss = profitPercent > 5 ? transaction.BuyPrice + (transaction.BuyPrice * 0.02m) : stopLossPrice;
+                decimal trailingStopLoss = profitPercent > (decimal)1.5 ? transaction.BuyPrice + (transaction.BuyPrice * 0.02m) : stopLossPrice;
 
                 if (profitPercent >= 1)
                 {
@@ -115,8 +104,8 @@ public class ScalpingSelJob : IJob
                 }
                 else
                 {
-                    var ema7 = await _historicalFetcher.GetEmaAsync(transaction.Symbol, 7, "5m");
-                    if (ema7.HasValue && quote.Close < ema7.Value)
+                    var ema21 = await _historicalFetcher.GetEmaAsync(transaction.Symbol, 21, "5m");
+                    if (ema21.HasValue && quote.Close < ema21.Value)
                     {
                         sell = true;
                         sellReason = "Close below EMA7 (5m)";

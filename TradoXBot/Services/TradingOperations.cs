@@ -37,56 +37,61 @@ public class TradingOperations
         _chatId = configuration["Telegram:ChatId"];
     }
 
-    public async Task ShowMenuAsync()
+    public async Task RunMethodAtIntervalAsync(Func<Task> method, TimeSpan interval, string methodName, CancellationToken token, TimeZoneInfo timeZone)
     {
-        while (true)
+        while (!token.IsCancellationRequested)
         {
-            Console.WriteLine("\n=== Trading Bot Menu ===");
-            Console.WriteLine("1. Execute Swing Buy");
-            Console.WriteLine("2. Execute Scalping Buy");
-            Console.WriteLine("3. Execute Swing Sell");
-            Console.WriteLine("4. Execute Scalping Sell");
-            Console.WriteLine("5. View Open Positions");
-            Console.WriteLine("6. Run Backtest");
-            Console.WriteLine("7. Exit");
-            Console.Write("Select an option (1-7): ");
-
-            var input = Console.ReadLine();
-            switch (input)
+            // Check if current time is between 9:15 AM and 10:15 AM
+            TimeSpan startTime = new(9, 10, 0); // 9:15 AM
+            TimeSpan endTime = new(15, 30, 0); // 15:30 pm 
+            var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+            TimeSpan currentTime = now.TimeOfDay;
+            bool isWithinTime = currentTime >= startTime && currentTime <= endTime && IsTradingDay(now);
+            if (!isWithinTime)
             {
-                case "1":
-                    await ExecuteSwingBuyAsync();
-                    break;
-                case "2":
-                    await ExecuteScalpingBuyAsync();
-                    break;
-                case "3":
-                    await ExecuteSwingSellAsync();
-                    break;
-                case "4":
-                    await ExecuteScalpingSellAsync();
-                    break;
-                case "5":
-                    await ViewOpenPositionsAsync();
-                    break;
-                case "6":
-                    await RunBacktestAsync();
-                    break;
-                case "7":
-                    _logger.LogInformation("Exiting Trading Bot.");
-                    return;
-                default:
-                    Console.WriteLine("Invalid option. Please select 1-7.");
-                    break;
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] {methodName} skipped (outside 9:15 AM - 3:30 PM window).");
+                return;
             }
+            else
+            {
+                Console.WriteLine($"{methodName} executed at {currentTime} IST");
+                Console.WriteLine($"[{DateTime.Now:HH:mm:ss}] Running {methodName}...");
+                await method();
+                // Execute the method
+            }
+            // Wait for the next interval
+            await Task.Delay(interval, token);
         }
     }
 
-    private async Task ExecuteSwingBuyAsync()
+    public async Task ExecuteTokenAuthAsync()
     {
         try
         {
-            _logger.LogInformation("Executing Swing Buy operation");
+            _logger.LogInformation("Executing Auth operation");
+            var job = ActivatorUtilities.CreateInstance<AuthJob>(_serviceProvider);
+            await job.Execute(null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error executing Swing Buy: {ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task ExecuteSwingBuyAsync()
+    {
+        try
+        {
+            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            TimeSpan currentTime = TimeZoneInfo.ConvertTime(DateTime.Now, istZone).TimeOfDay;
+            TimeSpan startTime = new(15, 23, 0); // 15:30 pm
+            TimeSpan endTime = new(15, 30, 0); // 15:30 pm
+
+            if (currentTime <= startTime && currentTime >= endTime) return;
+
+            _logger.LogInformation("Executing Buy Job at {Time} IST", currentTime);
             var job = ActivatorUtilities.CreateInstance<BuyJob>(_serviceProvider);
             await job.Execute(null);
         }
@@ -97,13 +102,21 @@ public class TradingOperations
         }
     }
 
-    private async Task ExecuteScalpingBuyAsync()
+    public async Task ExecuteScalpingBuyAsync()
     {
         try
         {
-            _logger.LogInformation("Executing Swing Buy operation");
+            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            TimeSpan currentTime = TimeZoneInfo.ConvertTime(DateTime.Now, istZone).TimeOfDay;
+            TimeSpan startTime = new(15, 23, 0); // 15:30 pm
+            TimeSpan endTime = new(15, 30, 0); // 15:30 pm
+
+            if (currentTime <= startTime && currentTime >= endTime) return;
+
+            _logger.LogInformation("Executing Scalping Buy operation");
             var job = ActivatorUtilities.CreateInstance<ScalpingBuyJob>(_serviceProvider);
             await job.Execute(null);
+
         }
         catch (Exception ex)
         {
@@ -112,13 +125,20 @@ public class TradingOperations
         }
     }
 
-    private async Task ExecuteSwingSellAsync()
+    public async Task ExecuteSwingSellAsync()
     {
         try
         {
+            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            TimeSpan currentTime = TimeZoneInfo.ConvertTime(DateTime.Now, istZone).TimeOfDay;
+            TimeSpan startTime = new(9, 15, 0); // 15:30 pm
+            TimeSpan endTime = new(15, 30, 0); // 15:30 pm
+
+            if (currentTime <= startTime && currentTime >= endTime) return;
             _logger.LogInformation("Executing Swing Buy operation");
             var job = ActivatorUtilities.CreateInstance<SellJob>(_serviceProvider);
             await job.Execute(null);
+
         }
         catch (Exception ex)
         {
@@ -127,12 +147,41 @@ public class TradingOperations
         }
     }
 
-    private async Task ExecuteScalpingSellAsync()
+    public async Task ExecuteScalpingSellAsync()
     {
+
         try
         {
+            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            TimeSpan currentTime = TimeZoneInfo.ConvertTime(DateTime.Now, istZone).TimeOfDay;
+            TimeSpan startTime = new(9, 15, 0); // 15:30 pm
+            TimeSpan endTime = new(15, 30, 0); // 15:30 pm
+
+            if (currentTime <= startTime && currentTime >= endTime) return;
             _logger.LogInformation("Executing Swing Buy operation");
             var job = ActivatorUtilities.CreateInstance<ScalpingSelJob>(_serviceProvider);
+            await job.Execute(null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Error executing Swing Buy: {ex.Message}");
+            throw;
+        }
+    }
+
+    public async Task ExecuteHouralyStatusAsync()
+    {
+
+        try
+        {
+            var istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+            TimeSpan currentTime = TimeZoneInfo.ConvertTime(DateTime.Now, istZone).TimeOfDay;
+            TimeSpan startTime = new(9, 15, 0); // 15:30 pm
+            TimeSpan endTime = new(15, 30, 0); // 15:30 pm
+
+            if (currentTime <= startTime && currentTime >= endTime) return;
+            _logger.LogInformation("Executing Swing Buy operation");
+            var job = ActivatorUtilities.CreateInstance<HourlyStatusJob>(_serviceProvider);
             await job.Execute(null);
         }
         catch (Exception ex)
@@ -262,38 +311,69 @@ public class TradingOperations
         }
     }
 
-
-    private bool IsMonthEnd()
+    public async Task ShowMenuAsync()
     {
-        var today = DateTime.Now;
-        var lastDayOfMonth = new DateTime(today.Year, today.Month, DateTime.DaysInMonth(today.Year, today.Month));
-        return today.Date >= lastDayOfMonth.AddDays(-3);
-    }
+        await ExecuteTokenAuthAsync();
 
-    private DateTime AddTradingDays(DateTime startDate, int tradingDays)
-    {
-        int daysToAdd = tradingDays;
-        DateTime resultDate = startDate;
-        int direction = tradingDays >= 0 ? 1 : -1;
-
-        while (daysToAdd != 0)
+        _logger.LogInformation("Trading Bot Console App Started (Test Mode)");
+        while (true)
         {
-            resultDate = resultDate.AddDays(direction);
-            if (IsTradingDay(resultDate))
+            Console.WriteLine("\nTrading Bot Test Menu:");
+            Console.WriteLine("1. Execute Buy Job");
+            Console.WriteLine("2. Execute Sell Job");
+            Console.WriteLine("3. Execute Scalping Buy Job");
+            Console.WriteLine("4. Execute Scalping Sell Job");
+            Console.WriteLine("5. Execute Hourly Status Job");
+            Console.WriteLine("6. Exit");
+            Console.Write("Select an option (1-6): ");
+
+            var input = Console.ReadLine();
+            try
             {
-                daysToAdd -= direction;
+                switch (input)
+                {
+                    case "1":
+                        var buyJob = ActivatorUtilities.CreateInstance<BuyJob>(_serviceProvider);
+                        await buyJob.Execute(null);
+                        break;
+                    case "2":
+                        var sellJob = ActivatorUtilities.CreateInstance<SellJob>(_serviceProvider);
+                        await sellJob.Execute(null);
+                        break;
+                    case "3":
+                        var scalpingJob = ActivatorUtilities.CreateInstance<ScalpingBuyJob>(_serviceProvider);
+                        await scalpingJob.Execute(null);
+                        break;
+                    case "4":
+                        var scalpingSellJob = ActivatorUtilities.CreateInstance<ScalpingSelJob>(_serviceProvider);
+                        await scalpingSellJob.Execute(null);
+                        break;
+                    case "5":
+                        var statusJob = ActivatorUtilities.CreateInstance<HourlyStatusJob>(_serviceProvider);
+                        await statusJob.Execute(null);
+                        break;
+                    case "6":
+                        _logger.LogInformation("Exiting Trading Bot Console App");
+                        return;
+                    default:
+                        Console.WriteLine("Invalid option. Please select 1-6.");
+                        break;
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogError($"Error executing option {input}: {ex.Message}");
+                Console.WriteLine($"Error: {ex.Message}");
             }
         }
-
-        return resultDate;
     }
-
-    private static bool IsTradingDay(DateTime date)
+    private bool IsTradingDay(DateTime date)
     {
         return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday && !Holidays.Contains(date.Date);
     }
 
-    private static readonly List<DateTime> Holidays =
+
+    private readonly List<DateTime> Holidays =
     [
         new DateTime(2025, 2, 26), // Mahashivratri
         new DateTime(2025, 3, 14), // Holi

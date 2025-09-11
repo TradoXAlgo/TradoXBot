@@ -36,10 +36,16 @@ public class SwingMonitorJob : IJob
     {
         try
         {
+
+            var status = await _stoxKartClient.AccessTokenKey();
+            await _telegramBot.SendMessage(_chatId, status);
+            if (status == null) return;
+
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
             var marketClose = new TimeSpan(15, 30, 0);
+
             if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
             {
                 _logger.LogInformation("Swing Monitor skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
@@ -47,14 +53,6 @@ public class SwingMonitorJob : IJob
             }
 
             _logger.LogInformation("Executing Swing Monitor Job at {Time} IST", now);
-
-            var status = await _stoxKartClient.AuthenticateAsync();
-            if (!status)
-            {
-                _logger.LogError("Authentication failed. Aborting swing buy.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                return;
-            }
 
             var openTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
             if (!openTransactions.Any())
@@ -159,24 +157,6 @@ public class SwingMonitorJob : IJob
             _logger.LogError("Error in Swing Monitor Job: {Message}", ex.Message);
             await _telegramBot.SendMessage(_chatId, $"Swing Monitor Error: {ex.Message}");
         }
-    }
-
-    private DateTime AddTradingDays(DateTime startDate, int tradingDays)
-    {
-        int daysToAdd = tradingDays;
-        DateTime resultDate = startDate;
-        int direction = tradingDays >= 0 ? 1 : -1;
-
-        while (daysToAdd != 0)
-        {
-            resultDate = resultDate.AddDays(direction);
-            if (IsTradingDay(resultDate))
-            {
-                daysToAdd -= direction;
-            }
-        }
-
-        return resultDate;
     }
 
     private static bool IsTradingDay(DateTime date)

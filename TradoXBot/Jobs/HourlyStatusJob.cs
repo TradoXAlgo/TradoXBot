@@ -34,24 +34,6 @@ namespace TradoXBot.Jobs
         {
             try
             {
-                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
-                var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
-                var marketOpen = new TimeSpan(9, 15, 0);
-                var marketClose = new TimeSpan(15, 30, 0);
-                if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
-                {
-                    _logger.LogInformation("Hourly Status Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
-                    return;
-                }
-
-                _logger.LogInformation("Executing Hourly Status Job at {Time} IST", now);
-                var status = await _stoxKartClient.AuthenticateAsync();
-                if (!status)
-                {
-                    _logger.LogError("Authentication failed. Aborting swing buy.");
-                    _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                    return;
-                }
 
                 var openSwingTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
                 var openScalpingTransactions = await _mongoDbService.GetOpenScalpingTransactionsAsync();
@@ -63,7 +45,8 @@ namespace TradoXBot.Jobs
                     .Where(t => t != null)
                     .Distinct()
                     .ToList();
-                var quotes =await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
+
+                var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
                 var symbolQuotes = new Dictionary<string, Quote>();
                 foreach (var kv in quotes)

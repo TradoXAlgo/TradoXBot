@@ -26,6 +26,8 @@ namespace TradoXBot
             var builder = Host.CreateDefaultBuilder(args)
                 .ConfigureServices((hostContext, services) =>
                 {
+
+                    Console.WriteLine("Job Started");
                     var configuration = hostContext.Configuration;
 
                     services.AddSingleton<IConfiguration>(configuration);
@@ -50,6 +52,12 @@ namespace TradoXBot
                     {
                         q.UseMicrosoftDependencyInjectionJobFactory();
 
+                        var authJobKey = new JobKey("AuthJob", "Trading");
+                        q.AddJob<AuthJob>(opts => opts.WithIdentity(authJobKey));
+                        q.AddTrigger(opts => opts
+                            .ForJob(authJobKey)
+                            .WithIdentity("AuthTrigger"));
+
                         // BuyJob (Swing, 3:25 PM IST)
                         var buyJobKey = new JobKey("BuyJob", "Trading");
                         q.AddJob<BuyJob>(opts => opts.WithIdentity(buyJobKey));
@@ -58,19 +66,19 @@ namespace TradoXBot
                             .WithIdentity("BuyTrigger")
                             .WithDailyTimeIntervalSchedule(s => s
                                 .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 25))
-                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 25))
+                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 30))
                                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
                                 .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
                                         DayOfWeek.Thursday, DayOfWeek.Friday)));
 
-                        // ScalpingMonitorJob (every 5 minutes, 9:15 AM–2:30 PM IST)
+                        //ScalpingMonitorJob (every 5 minutes, 9:15 AM–2:30 PM IST)
                         var scalpingJobKey = new JobKey("ScalpingMonitorJob", "Trading");
                         q.AddJob<ScalpingBuyJob>(opts => opts.WithIdentity(scalpingJobKey));
                         q.AddTrigger(opts => opts
                             .ForJob(scalpingJobKey)
                             .WithIdentity("ScalpingBuyTrigger")
                             .WithDailyTimeIntervalSchedule(s => s
-                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 15))
+                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 10))
                                 .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(14, 30))
                                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
                                 .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
@@ -78,19 +86,19 @@ namespace TradoXBot
                                 .WithIntervalInMinutes(5)));
 
 
-                        // ScalpingMonitorJob (every 5 minutes, 9:15 AM–2:30 PM IST)
+                        // // ScalpingMonitorJob (every 5 minutes, 9:15 AM–2:30 PM IST)
                         var scalpingSellJobKey = new JobKey("ScalpingSellJob", "Trading");
                         q.AddJob<ScalpingSelJob>(opts => opts.WithIdentity(scalpingSellJobKey));
                         q.AddTrigger(opts => opts
                             .ForJob(scalpingSellJobKey)
                             .WithIdentity("ScalpingSellTrigger")
                             .WithDailyTimeIntervalSchedule(s => s
-                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 15))
-                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(14, 30))
+                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 10))
+                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 30))
                                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
                                 .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
                                         DayOfWeek.Thursday, DayOfWeek.Friday)
-                                .WithIntervalInMinutes(5)));
+                                .WithIntervalInMinutes(6)));
 
 
                         // SellJob (Swing, every 15 minutes, 9:15 AM–3:30 PM IST)
@@ -100,42 +108,12 @@ namespace TradoXBot
                             .ForJob(sellJobKey)
                             .WithIdentity("SellTriggerQuat")
                             .WithDailyTimeIntervalSchedule(s => s
-                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 15))
-                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 20))
+                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 0))
+                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(10, 15))
                                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
                                 .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
                                         DayOfWeek.Thursday, DayOfWeek.Friday)
-                                .WithIntervalInMinutes(15)));
-
-                        q.AddTrigger(opts => opts
-                                                    .ForJob(sellJobKey)
-                                                    .WithIdentity("SellTriggerQuat")
-                                                    .WithDailyTimeIntervalSchedule(s => s
-                                                        .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(9, 15))
-                                                        .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 20))
-                                                        .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))
-                                                        .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
-                                                                DayOfWeek.Thursday, DayOfWeek.Friday)
-                                                        .WithIntervalInMinutes(1)));
-                        // After first hour: hourly
-                        q.AddTrigger(opts => opts
-                            .ForJob(sellJobKey)
-                            .WithIdentity("SellTriggerHourly", "Trading")
-                            .WithDailyTimeIntervalSchedule(s => s
-                                .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(10, 15))
-                                .EndingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 20))
-                                .OnDaysOfTheWeek(DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
-                                        DayOfWeek.Thursday, DayOfWeek.Friday)
-                                .WithIntervalInHours(1)));
-
-                        q.AddTrigger(opts => opts
-                            .ForJob(sellJobKey)
-                            .WithIdentity("SellTrigger24Hours", "Trading")
-                            .WithDailyTimeIntervalSchedule(s =>
-                                s.WithIntervalInHours(24)
-                                 .OnEveryDay()
-                                 .StartingDailyAt(TimeOfDay.HourAndMinuteOfDay(15, 15))
-                                 .InTimeZone(TimeZoneInfo.FindSystemTimeZoneById("India Standard Time"))));
+                                .WithIntervalInMinutes(5)));
 
                         // HourlyStatusJob (hourly, 9:15 AM–3:30 PM IST)
                         var statusJobKey = new JobKey("HourlyStatusJob", "Trading");
@@ -163,11 +141,9 @@ namespace TradoXBot
                         logging.AddConsole();
                         logging.SetMinimumLevel(LogLevel.Information);
                     });
-                    //services.AddHostedService<TradoXBotHostedService>();
                 });
 
-            var host = builder.Build();
-
+            using var host = builder.Build();
             // Check if running as a service or interactive mode
             if (args.Length > 0 && args[0].Equals("--service", StringComparison.OrdinalIgnoreCase))
             {
@@ -175,85 +151,63 @@ namespace TradoXBot
             }
             else
             {
-                //await host.RunAsync();
-                //Console.WriteLine("Done!");
+                var cts = new CancellationTokenSource();
                 var tradingOperations = host.Services.GetRequiredService<TradingOperations>();
-                await tradingOperations.ShowMenuAsync();
+                TimeZoneInfo istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                TimeSpan startTime = new(9, 10, 0); // 9:15 AM
+                TimeSpan endTime = new(15, 30, 0); // 15:30 pm 
+                var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+                var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+                TimeSpan currentTime = now.TimeOfDay;
+                bool isWithinTime = currentTime >= startTime && currentTime <= endTime && IsTradingDay(now); 
+                if (!isWithinTime)
+                {
+                    await tradingOperations.ShowMenuAsync();
+                }
+                else
+                {
+                    var tasks = new[]
+                    {
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteTokenAuthAsync(), TimeSpan.FromMinutes(5), "AuthJob", cts.Token, istZone),
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteSwingBuyAsync(), TimeSpan.FromMinutes(5), "BuyJob", cts.Token, istZone),
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteSwingSellAsync(), TimeSpan.FromMinutes(5), "5Mnt", cts.Token,istZone),
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteSwingSellAsync(), TimeSpan.FromMinutes(340), "endDay", cts.Token, istZone),
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteScalpingBuyAsync(), TimeSpan.FromMinutes(5), "scalpingBuy", cts.Token, istZone),
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteScalpingSellAsync(), TimeSpan.FromMinutes(6), "scalpingsell", cts.Token, istZone),
+                     tradingOperations.RunMethodAtIntervalAsync(async()=> await tradingOperations.ExecuteHouralyStatusAsync(), TimeSpan.FromMinutes(59), "shoyralyStatus", cts.Token, istZone),
+                 };
+                    await Task.WhenAll(tasks);
+                    //cts.Cancel();
+                    // Keep the program running 
+                    //await host.RunAsync();
+                }
+
+                Console.ReadLine();
             }
         }
-    }
-}
 
+        private static bool IsTradingDay(DateTime date)
+        {
+            return date.DayOfWeek != DayOfWeek.Saturday && date.DayOfWeek != DayOfWeek.Sunday && !Holidays.Contains(date.Date);
+        }
 
-public sealed class TradoXBotHostedService : IHostedService, IHostedLifecycleService
-{
-    private readonly ILogger _logger;
-
-    public TradoXBotHostedService(
-        ILogger<TradoXBotHostedService> logger,
-        IHostApplicationLifetime appLifetime)
-    {
-        _logger = logger;
-
-        appLifetime.ApplicationStarted.Register(OnStarted);
-        appLifetime.ApplicationStopping.Register(OnStopping);
-        appLifetime.ApplicationStopped.Register(OnStopped);
-    }
-
-    Task IHostedLifecycleService.StartingAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("1. StartingAsync has been called.");
-
-        return Task.CompletedTask;
-    }
-
-    Task IHostedService.StartAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("2. StartAsync has been called.");
-
-        return Task.CompletedTask;
+        private static readonly List<DateTime> Holidays =
+        [
+            new DateTime(2025, 2, 26), // Mahashivratri
+        new DateTime(2025, 3, 14), // Holi
+        new DateTime(2025, 3, 31), // Eid-Ul-Fitr
+        new DateTime(2025, 4, 10), // Shri Mahavir Jayanti
+        new DateTime(2025, 4, 14), // Dr. Baba Saheb Ambedkar Jayanti
+        new DateTime(2025, 4, 18), // Good Friday
+        new DateTime(2025, 5, 1), // Maharashtra Day
+        new DateTime(2025, 8, 15), // Independence Day
+        new DateTime(2025, 8, 27), // Ganesh Chaturthi
+        new DateTime(2025, 10, 2), // Mahatma Gandhi Jayanti/Dussehra
+        new DateTime(2025, 10, 21), // Diwali Laxmi Pujan
+        new DateTime(2025, 10, 22), // Diwali-Balipratipada
+        new DateTime(2025, 11, 5), // Prakash Gurpurb Sri Guru Nanak Dev
+        new DateTime(2025, 12, 25) // Christmas
+        ];
     }
 
-    Task IHostedLifecycleService.StartedAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("3. StartedAsync has been called.");
-
-        return Task.CompletedTask;
-    }
-
-    private void OnStarted()
-    {
-        _logger.LogInformation("4. OnStarted has been called.");
-    }
-
-    private void OnStopping()
-    {
-        _logger.LogInformation("5. OnStopping has been called.");
-    }
-
-    Task IHostedLifecycleService.StoppingAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("6. StoppingAsync has been called.");
-
-        return Task.CompletedTask;
-    }
-
-    Task IHostedService.StopAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("7. StopAsync has been called.");
-
-        return Task.CompletedTask;
-    }
-
-    Task IHostedLifecycleService.StoppedAsync(CancellationToken cancellationToken)
-    {
-        _logger.LogInformation("8. StoppedAsync has been called.");
-
-        return Task.CompletedTask;
-    }
-
-    private void OnStopped()
-    {
-        _logger.LogInformation("9. OnStopped has been called.");
-    }
 }

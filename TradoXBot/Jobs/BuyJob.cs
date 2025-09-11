@@ -32,28 +32,9 @@ public class BuyJob : IJob
     {
         try
         {
-            _logger.LogInformation("Executing Swing Buy Job at {Time}", DateTime.Now);
-
-
-            var status = await _stoxKartClient.AuthenticateAsync();
-            if (!status)
-            {
-                _logger.LogError("Authentication failed. Aborting swing buy.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                return;
-            }
-
-            var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
-            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
-            var marketOpen = new TimeSpan(9, 15, 0);
-            var marketClose = new TimeSpan(15, 30, 0);
-            var buyTime = new TimeSpan(15, 25, 0);
-
-            if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now) || now.TimeOfDay != buyTime)
-            {
-                _logger.LogInformation("Buy Job skipped: Outside market hours (9:15 AM - 3:30 PM IST), not a trading day, or not 3:25 PM IST.");
-                return;
-            }
+            var status = await _stoxKartClient.AccessTokenKey();
+            await _telegramBot.SendMessage(_chatId, status);
+            if (status == null) return;
 
             if (IsMonthEnd())
             {
@@ -61,14 +42,11 @@ public class BuyJob : IJob
                 await _telegramBot.SendMessage(_chatId, "Buy Job: Skipped due to month-end.");
                 return;
             }
-
-            _logger.LogInformation("Executing Buy Job at {Time} IST", now);
-            Console.WriteLine("Buy Jobs");
             var availableFunds = await _stoxKartClient.GetFundsAsync();
             if (availableFunds <= 20000)
             {
-                _logger.LogWarning("Insufficient funds for swing buy (≤ ₹20,000).");
-                await _telegramBot.SendMessage(_chatId, "Buy Job: Insufficient funds (≤ ₹20,000).");
+                _logger.LogWarning($"Buy Job: Insufficient funds (≤ ₹20,000), Current Fund{availableFunds}");
+                await _telegramBot.SendMessage(_chatId, $"Buy Job: Insufficient funds (≤ ₹20,000), Current Fund{availableFunds}");
                 return;
             }
 
@@ -139,16 +117,16 @@ public class BuyJob : IJob
                 }
 
                 // Check uptrend and breakout conditions
-                bool isUptrend = await _historicalFetcher.IsPriceAboveEmaAsync(stock.Symbol, 50);
+                //bool isUptrend = await _historicalFetcher.IsPriceAboveEmaAsync(stock.Symbol, 50);
                 //bool isBreakout = await _historicalFetcher.IsBreakoutAsync(stock.Symbol);
-                bool isRsiValid = await _historicalFetcher.GetRsiAsync(stock.Symbol) > 50;
-                bool isVolumeValid = await _historicalFetcher.IsVolumeAboveSmaAsync(stock.Symbol, 20);
+                //bool isRsiValid = await _historicalFetcher.GetRsiAsync(stock.Symbol) > 50;
+                //bool isVolumeValid = await _historicalFetcher.IsVolumeAboveSmaAsync(stock.Symbol, 20);
 
-                if (!isUptrend || !isRsiValid || !isVolumeValid)
-                {
-                    _logger.LogInformation("Skipping {Symbol}: Does not meet uptrend/breakout/RSI/volume criteria.", stock.Symbol);
-                    continue;
-                }
+                // if (!isUptrend || !isRsiValid || !isVolumeValid)
+                // {
+                //     _logger.LogInformation("Skipping {Symbol}: Does not meet uptrend/breakout/RSI/volume criteria.", stock.Symbol);
+                //     continue;
+                // }
 
                 // Calculate quantity based on 1% risk
                 decimal? atr = await _historicalFetcher.GetAtrAsync(stock.Symbol, 14);

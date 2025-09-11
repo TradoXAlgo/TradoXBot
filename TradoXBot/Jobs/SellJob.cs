@@ -38,23 +38,24 @@ public class SellJob : IJob
     {
         try
         {
+
+            var status =await _stoxKartClient.AccessTokenKey();
+            await _telegramBot.SendMessage(_chatId, status);
+            if (status == null) return;
+
             var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
             var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
             var marketOpen = new TimeSpan(9, 15, 0);
             var marketClose = new TimeSpan(15, 20, 0);
-            if (now.TimeOfDay < marketOpen || now.TimeOfDay > marketClose || !IsTradingDay(now))
-            {
-                _logger.LogInformation("Sell Job skipped: Outside market hours (9:15 AM - 3:30 PM IST) or not a trading day.");
-                return;
-            }
 
             _logger.LogInformation("Executing Swing Sell Job at {Time}", DateTime.Now);
-            var status = await _stoxKartClient.AuthenticateAsync();
-            if (!status) return;
 
             var openTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
             var tokens = await _stoxKartClient.GetInstrumentTokensAsync("NSE");
             var holdins = await _stoxKartClient.GetPortfolioHoldingsAsync();
+
+            List<PortfolioHolding> holdingList = [];
+
 
             var scannerStocks = await _chartinkScraper.GetStocksAsync();
             var scannerSymbols = scannerStocks.Select(s => s.Symbol.ToUpper()).ToList();
@@ -66,9 +67,23 @@ public class SellJob : IJob
                 .Distinct()
                 .ToList();
 
+            foreach (var transaction in openTransactions)
+            {
+                // Check if stock is available in portfolio holdings
+                if (holdingsSymbols.Contains(transaction.Symbol.ToUpper()))
+                {
+                    holdingList.Add(new PortfolioHolding { Symbol = transaction.Symbol });
+                    _logger.LogInformation("Skipping {Symbol}: Not available in portfolio holdings.", transaction.Symbol);
+                    continue;
+                }
+            }
+
+            if (holdingList.Count == 0) return;
+
             var quotes = await _stoxKartClient.GetQuotesAsync("NSE", quoteRequests);
 
             var symbolQuotes = new Dictionary<string, Quote>();
+
             foreach (var kv in quotes)
             {
                 var symbol = openTransactions.FirstOrDefault(t => tokens.GetValueOrDefault(t.Symbol) == kv.Key)?.Symbol;
@@ -134,7 +149,7 @@ public class SellJob : IJob
                     sell = true;
                     sellReason = ">2% profit since yesterday";
                 }
-                else if (transactionsBoughtYesterday.Any(t => t.Symbol == transaction.Symbol) && profitPercent >= 5)
+                else if (transactionsBoughtAfter2Day.Any(t => t.Symbol == transaction.Symbol) && profitPercent >= 5)
                 {
                     sell = true;
                     sellReason = ">5% profit since yesterday";

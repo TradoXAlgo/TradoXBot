@@ -29,3 +29,12 @@ public class Transaction
                $"Status: {(IsOpen ? "Open" : "Closed")}, Type: {TransactionType}";
     }
 }
+
+public class AuthToken
+{
+    public string? Id { get; set; }
+    public string? TokenKey { get; set; }
+    public string? TokenName { get; set; }
+    public DateTime? OnDate { get; set; }
+
+}

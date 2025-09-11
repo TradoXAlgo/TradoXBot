@@ -34,15 +34,11 @@ public class StatusJob : IJob
     {
         try
         {
-            _logger.LogInformation("Executing Status Job at {Time}", DateTime.Now);
 
-            var status = await _stoxKartClient.AuthenticateAsync();
-            if (!status)
-            {
-                _logger.LogError("Authentication failed. Aborting swing buy.");
-                _ = await _telegramBot.SendMessage(_chatId, "Swing Buy: Authentication failed.");
-                return;
-            }
+            var status = await _stoxKartClient.AccessTokenKey();
+            if (status == null) return;
+
+            _logger.LogInformation("Executing Status Job at {Time}", DateTime.Now);
 
             var swingTransactions = await _mongoDbService.GetOpenSwingTransactionsAsync();
             var scalpingTransactions = await _mongoDbService.GetOpenScalpingTransactionsAsync();

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TradoXBot")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+50d4b63343a9c354926501d61f224cd23017ac65")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+10b05302c0598e8c58a58272cd77223d6c6a05ca")]
 [assembly: System.Reflection.AssemblyProductAttribute("TradoXBot")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TradoXBot")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

@@ -6,6 +6,7 @@ using System.Reflection.Metadata;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
+using System.Threading.Tasks;
 using Telegram.Bot;
 using TradoXBot.Models;
 using TradoXBot.SuperrApiConnect;
@@ -22,27 +23,25 @@ public class StoxKartClient
     private readonly string _clientId;
     private readonly string _password;
     private string? _accessToken;
-    private string? _telegramAPI;
     private const string BaseUrl = "https://openapi.stoxkart.com/";
     private SuperrApi? _superrApi;
     private Ticker? ticker;
     private readonly IAsyncPolicy _retryPolicy;
     private DateTime _tokenExpiry;
-    private readonly TelegramBotClient _telegramBot;
+    private readonly MongoDbService _mongoDbService;
 
-    public StoxKartClient(IConfiguration configuration, ILogger<StoxKartClient> logger)
+    public StoxKartClient(IConfiguration configuration, ILogger<StoxKartClient> logger, MongoDbService mongoDbService)
     {
         _apiKey = configuration["Stoxkart:ApiKey"] ?? throw new ArgumentNullException(nameof(configuration));
         _apiSecret = configuration["Stoxkart:ApiSecret"] ?? throw new ArgumentNullException(nameof(configuration));
         _clientId = configuration["Stoxkart:ClientId"] ?? throw new ArgumentNullException(nameof(configuration));
         _password = configuration["Stoxkart:Password"] ?? throw new ArgumentNullException(nameof(configuration));
-        _telegramAPI = configuration["Telegram:ApiKey"] ?? throw new ArgumentNullException(nameof(configuration));
         _httpClient = new HttpClient { BaseAddress = new Uri(BaseUrl) };
         _logger = logger;
         _configuration = configuration;
         _superrApi = new SuperrApi(_clientId, _password, _apiKey, _apiSecret);
+        _mongoDbService = mongoDbService;
         _httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
-        _telegramBot = new TelegramBotClient(_telegramAPI);
         // Initialize Polly retry policy
         _retryPolicy = Policy.Handle<HttpRequestException>()
             .WaitAndRetryAsync(3, retryAttempt => TimeSpan.FromSeconds(Math.Pow(2, retryAttempt)),
@@ -50,6 +49,15 @@ public class StoxKartClient
             {
                 _logger.LogWarning($"Retry {retryCount} encountered an error: {exception.Message}. Waiting {timeSpan} before next retry.");
             });
+    }
+
+    public async Task<string> AccessTokenKey()
+    {
+        var accessToken = await _mongoDbService.GetAuthTokenAsync();
+        if (accessToken != null)
+            _accessToken = accessToken.FirstOrDefault().TokenKey;
+
+        return _accessToken;
     }
 
     public async Task<bool> AuthenticateAsync()
@@ -69,8 +77,17 @@ public class StoxKartClient
                 return false;
             }
             _accessToken = _superrApi.GetAccessToken()?.ToString();
+            if (_accessToken == "failure:Session token is wrong") return false;
 
-            Console.WriteLine("access Token ::" + _accessToken);
+            var accessToken = await _mongoDbService.GetAuthTokenAsync();
+            if (accessToken.Count == 0)
+            {
+                await _mongoDbService.InsertAuthTokenAsync(new AuthToken { TokenKey = _accessToken });
+            }
+            else
+            {
+                await _mongoDbService.UpdateAuthTokenAsync(_accessToken);
+            }
             if (string.IsNullOrEmpty(_accessToken))
             {
                 _logger.LogError("No access token received in login response.");
@@ -125,8 +142,17 @@ public class StoxKartClient
             throw new Exception("Not authenticated.");
         }
         CancellationTokenSource cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+        TimeZoneInfo istZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+        TimeSpan startTime = new(9, 10, 0); // 9:15 AM
+        TimeSpan endTime = new(15, 30, 0); // 15:30 pm 
+        var istTimeZone = TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, istTimeZone);
+        TimeSpan currentTime = now.TimeOfDay;
+        bool isWithinTime = currentTime >= startTime && currentTime <= endTime;
+
         Dictionary<string, dynamic> PlaceOrderResponse = _superrApi.PlaceOrder(
-                        variety: "NORMAL", //AMO-NORMAL
+                        variety: isWithinTime ? "NORMAL" : "AMO", //AMO-NORMAL
                         action: action,
                         exchange: exchange,
                         token: token,
